@@ -1,7 +1,7 @@
 import type { KeyboardEvent, ReactNode } from "react";
 import { metres } from "./format";
 import { DroneIcon, PhoneIcon, PX } from "./icons";
-import { annulusPath, listening, rangeRings } from "./mapgeom";
+import { annulusPath, hearsDrone, listening, rangeRings } from "./mapgeom";
 import { outlinePath, ROOM } from "./room";
 import type { StateMessage } from "./state";
 
@@ -136,16 +136,17 @@ export function MapView({ state, selected, onSelect }: Props) {
       {state.phones.map((phone) => {
         const state_ = listening(phone.status);
         const isSelected = selected?.kind === "phone" && selected.profile === phone.profile;
+        const detecting = hearsDrone(phone);
         return (
           <Clickable
             key={phone.profile}
-            label={`${phone.label} : ${phone.status === "streaming" ? "à l'écoute" : "pas à l'écoute"}`}
+            label={`${phone.label} : ${phone.status === "streaming" ? "à l'écoute" : "pas à l'écoute"}${detecting ? ", détecte le drone" : ""}`}
             selected={isSelected}
             onSelect={() => onSelect({ kind: "phone", profile: phone.profile })}
-            className={`phone-marker ${state_}`}
+            className={`phone-marker ${state_} ${detecting ? "detecting" : ""}`}
             x={phone.position_m.x}
             y={phone.position_m.y}
-            data={{ "data-profile": phone.profile, "data-listening": state_ }}
+            data={{ "data-profile": phone.profile, "data-listening": state_, "data-detecting": String(detecting) }}
           >
             {state_ === "on" && <circle r={0.48} className="pulse" />}
             <circle r={0.62} className="selection" />

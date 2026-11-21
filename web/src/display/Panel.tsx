@@ -91,6 +91,7 @@ function Legend() {
   return (
     <ul className="legend">
       <li><Glyph kind="phone" size={18} /> Téléphone</li>
+      <li><Glyph kind="phone-detecting" size={18} /> Téléphone qui détecte</li>
       <li><Glyph kind="drone" size={18} /> Drone (calculé)</li>
       <li><Glyph kind="ghost" size={18} /> Drone simulé (réel)</li>
       <li><span className="swatch ring" /> Distance ± marge</li>

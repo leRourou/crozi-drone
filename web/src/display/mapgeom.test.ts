@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { phone } from "./fakes";
-import { annulusPath, listening, rangeRings } from "./mapgeom";
+import { annulusPath, hearsDrone, listening, rangeRings } from "./mapgeom";
 import type { PhoneState } from "./state";
 
 const at = (overrides: Record<string, unknown>) => phone(overrides) as unknown as PhoneState;
@@ -50,5 +50,19 @@ describe("listening", () => {
       "off",
       "never",
     ]);
+  });
+});
+
+describe("hearsDrone", () => {
+  const detection = (drone: boolean, fresh: boolean) =>
+    drone
+      ? { drone, distance_m: 3, uncertainty_rel: 0.1, age_s: 0, fresh }
+      : { drone, distance_m: null, uncertainty_rel: null, age_s: 0, fresh };
+
+  it("is true only for a fresh detection of the drone", () => {
+    expect(hearsDrone(at({ detection: detection(true, true) }))).toBe(true);
+    expect(hearsDrone(at({ detection: detection(true, false) }))).toBe(false);
+    expect(hearsDrone(at({ detection: detection(false, true) }))).toBe(false);
+    expect(hearsDrone(at({ detection: null }))).toBe(false);
   });
 });

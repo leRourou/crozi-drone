@@ -27,6 +27,11 @@ export function annulusPath(cx: number, cy: number, inner: number, outer: number
   return circle(outer) + circle(inner);
 }
 
+/** Le téléphone entend le drone en ce moment : détection du drone, et récente. */
+export function hearsDrone(phone: PhoneState): boolean {
+  return phone.detection?.drone === true && phone.detection.fresh;
+}
+
 export type Listening = "on" | "degraded" | "off" | "never";
 
 const LISTENING: Record<PhoneStatus, Listening> = {

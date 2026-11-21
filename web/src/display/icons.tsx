@@ -33,10 +33,10 @@ export function DroneIcon() {
 }
 
 /** Icône seule, pour la légende et le panneau. */
-export function Glyph({ kind, size = 22 }: { kind: "phone" | "drone" | "ghost"; size?: number }) {
+export function Glyph({ kind, size = 22 }: { kind: "phone" | "phone-detecting" | "drone" | "ghost"; size?: number }) {
   return (
     <svg viewBox="-26 -26 52 52" width={size} height={size} className={`glyph ${kind}`} aria-hidden="true">
-      {kind === "phone" ? <PhoneIcon /> : <DroneIcon />}
+      {kind.startsWith("phone") ? <PhoneIcon /> : <DroneIcon />}
     </svg>
   );
 }
