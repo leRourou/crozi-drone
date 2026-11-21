@@ -4,6 +4,7 @@ import { appendLog, clock, type LogLine } from "./logbuffer";
 import { isLittleEndian } from "./packetizer";
 import { findProfile, PROFILES, type Profile } from "./profiles";
 import { type LogLevel, type Status, Streamer, subtleSha256Hex } from "./streamer";
+import { ScreenWakeLock } from "./wakelock";
 
 function socketUrl(): string {
   const scheme = location.protocol === "https:" ? "wss" : "ws";
@@ -176,7 +177,26 @@ export function App() {
 
   useEffect(() => () => streamer.stop(), [streamer]);
 
+  const wakeLock = useMemo(
+    () =>
+      new ScreenWakeLock({
+        request: "wakeLock" in navigator ? (type) => navigator.wakeLock.request(type) : undefined,
+        onVisible: (callback) =>
+          document.addEventListener("visibilitychange", () => {
+            if (document.visibilityState === "visible") callback();
+          }),
+        log,
+      }),
+    [log],
+  );
+
   const running = status.state === "starting" || status.state === "streaming" || status.state === "reconnecting";
+
+  useEffect(() => {
+    if (!running) return;
+    wakeLock.hold();
+    return () => wakeLock.release();
+  }, [running, wakeLock]);
   const webkit = status.webkit ?? expected.webkit;
   const lastError = status.state === "error" ? lines.findLast((l) => l.level === "error") : undefined;
   const goTo = (profile?: Profile) => {

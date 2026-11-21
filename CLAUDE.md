@@ -40,7 +40,8 @@ Arborescence : un package Python par module, assemblés par `services/api`.
 packages/audio-capture/   ① récupération du son : protocol.py (validation à la frontière),
                              session.py (seq + SHA), stats.py (diagnostic), recording.py
 services/api/             main.py (endpoint /ws/audio, create_app, logs `event=… clé=valeur`), logfmt.py
-web/src/capture/          ① page téléphone : packetizer.ts, streamer.ts (session, relance), App.tsx (UI)
+web/src/capture/          ① page téléphone : packetizer.ts, streamer.ts (session, relance, reconnexion),
+                             wakelock.ts (écran allumé), App.tsx (UI)
 web/src/shared/           edth-capture.d.ts (types du module partagé)
 conftest.py               helpers de test partagés (make_hello, sine, packet)
 ```
@@ -50,7 +51,7 @@ entraînement ↔ inférence), `packages/distance-estimation` (② son → dista
 `web/src/display/` (④ affichage des sources sonores + position du drone).
 Règle : un module n'importe jamais un autre module ; seul `services/api` les assemble.
 
-- Lot 2 non fait : `network_too_slow`, reconnexion avec délai croissant, Wake Lock.
+- Lot 2 fait : `network_too_slow`, reconnexion avec délai croissant (`docs/protocol.md`), Wake Lock.
 
 ## Qualité
 `~/tools/crapper/crapper`, `~/tools/dryer/dryer`, `~/tools/mutator/mutator` (composants UI purs
