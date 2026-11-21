@@ -51,7 +51,7 @@ packages/distance-estimation/ ② son → distance : estimator.py (interface Aud
 services/api/             main.py (/ws/audio, /ws/state, create_app, make_estimation, logs `event=… clé=valeur`),
                              settings.py (seul lecteur des variables d'environnement du temps réel),
                              state.py (PhoneRegistry : état par téléphone, la session la plus récente gagne),
-                             fusion.py (③ : sélection des détections, localiser_drone en thread, tâche de fond),
+                             fusion.py (③ : sélection des détections, localiser_drone en thread, piste `Tracker`, tâche de fond),
                              logfmt.py, profiles.py (charge et valide contracts/profiles.json au démarrage)
 contracts/profiles.json   seule source des téléphones (id, libellé, position x ; y ; z en mètres) pour Python et TS
 web/src/capture/          ① page téléphone : packetizer.ts, streamer.ts (session, relance, reconnexion),
@@ -65,6 +65,8 @@ web/src/shared/           edth-capture.d.ts (types du module partagé), profiles
 packages/localization/    ③ distances → position : calculation.py `localiser_drone` (capteurs 3D, `tol`
                              relative, grille ≈ 60 ms/appel, appelé dans un thread). Code de Maxence,
                              fins de ligne CRLF conservées.
+                             tracking.py `SuiviDrone` : EKF sur les distances (piste `track`, lissage),
+                             démarré sur la zone de `localiser_drone`, altitude tirée vers TRACK_ALTITUDE_M.
 conftest.py               helpers de test partagés (make_hello, sine, packet, TEAM_PROFILES lu du contrat)
 ```
 À venir (ne pas créer avant d'en avoir le code) : `packages/features` (prétraitement commun

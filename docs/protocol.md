@@ -120,7 +120,11 @@ virtuel sur une trajectoire connue).
 | `STATE_PERIOD_MS` | 250 | intervalle entre deux messages `state` |
 | `STALE_AFTER_MS` | 1000 | seuil `streaming` → `stale` |
 | `DETECTION_FRESH_MS` | 2000 | âge maximal d'une détection `fresh` |
-| `FUSION_SPREAD_MS` | 500 | écart maximal entre les détections combinées par ③ |
+| `FUSION_SPREAD_MS` | 500 | écart maximal entre les détections combinées par ③ (zone brute, démarrage de la piste) |
+| `TRACK_ACCEL_STD` | 1.0 | piste : accélération non modélisée (m/s²) ; plus grand = plus réactif, plus petit = plus lisse |
+| `TRACK_TIMEOUT_MS` | 1000 | piste perdue sans distance acceptée depuis ce délai |
+| `TRACK_ALTITUDE_M` | 1.5 | piste : altitude attendue du drone (≥ 0) |
+| `TRACK_ALTITUDE_STD_M` | 0.5 | piste : souplesse de cette altitude (écart-type) |
 | `SCRIPTED_OFFSET_EAST_M` | 0.5 | drone simulé : centre du cercle, décalage vers l'est depuis le barycentre des téléphones |
 | `SCRIPTED_OFFSET_NORTH_M` | 3 | idem vers le nord (y décroissant) |
 | `SCRIPTED_RADIUS_M` | 3 | rayon du cercle |
@@ -141,6 +145,8 @@ de démarrer (message d'erreur nommant la variable).
 { "status": "located|insufficient|no_detection|inconsistent", "detecting": 3, "age_s": 0.1,
   "zone": { "x_m": 3.1, "y_m": 7.9, "radius_m": 0.8, "z_m": 1.4, "z_min_m": 1.1, "z_max_m": 1.7,
             "tolerance": 0.1, "degraded": false } | null,
+  "track": { "x_m": 3.0, "y_m": 8.1, "z_m": 1.5, "vx_mps": 0.3, "vy_mps": -0.4, "radius_m": 0.4,
+             "z_min_m": 1.2, "z_max_m": 1.8 } | null,
   "truth": { "x_m": 3.0, "y_m": 8.0, "z_m": 1.5 } | null }
 ```
 
@@ -151,6 +157,14 @@ de démarrer (message d'erreur nommant la variable).
 - `zone` : repère de la salle (x vers l'est, y vers le sud, mètres) ; disque `radius_m` autour de
   (`x_m`, `y_m`), altitude `z_m` dans [`z_min_m`, `z_max_m`] ; `tolerance` = plus grande incertitude des
   détections, élargie si `degraded`.
+- `track` : piste du drone, filtre de Kalman étendu (`packages/localization/tracking.py`) sur les
+  distances, une correction par détection nouvelle, à son instant ; indépendante de `status` (elle se
+  poursuit avec 1 ou 2 téléphones). Démarre sur la `zone` d'un tick qui apporte des détections
+  nouvelles ; repart de la zone après 5 corrections rejetées d'affilée (test χ² à 99 %) ; perdue
+  (`null`) sans distance acceptée depuis `TRACK_TIMEOUT_MS`. Position et vitesse horizontale prédites à
+  l'instant du calcul ; disque `radius_m` = 2 σ ; altitude tirée vers `TRACK_ALTITUDE_M` (téléphones
+  coplanaires : les distances seules disent peu de z) et jamais sous le sol. L'incertitude relative d'une
+  distance est lue comme une borne à ≈ 2 σ.
 - `truth` : position vraie du drone simulé (`DISTANCE_ESTIMATOR=scripted`), pour vérifier la chaîne ;
   `null` sinon.
 

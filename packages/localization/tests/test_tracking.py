@@ -3,9 +3,8 @@
 import math
 import random
 
-import pytest
-
 import numpy as np
+import pytest
 
 from localization import Mesure, SuiviDrone, Zone
 from localization.tracking import _transition

@@ -41,6 +41,11 @@ class Settings:
     stale_after_ms: int = _setting("STALE_AFTER_MS", _MS, 1000)  # streaming → stale
     detection_fresh_ms: int = _setting("DETECTION_FRESH_MS", _MS, 2000)  # détection périmée
     fusion_spread_ms: int = _setting("FUSION_SPREAD_MS", _MS, 500)  # écart max entre détections
+    # Piste du drone (③, filtre de Kalman étendu)
+    track_accel_std: float = _setting("TRACK_ACCEL_STD", _POSITIVE, 1.0)  # m/s², grand = réactif
+    track_timeout_ms: int = _setting("TRACK_TIMEOUT_MS", _MS, 1000)  # piste perdue sans distance
+    track_altitude_m: float = _setting("TRACK_ALTITUDE_M", _NON_NEGATIVE, 1.5)  # altitude attendue
+    track_altitude_std_m: float = _setting("TRACK_ALTITUDE_STD_M", _POSITIVE, 0.5)  # sa souplesse
     # Drone simulé (DISTANCE_ESTIMATOR=scripted) : cercle près des téléphones, repère de la salle
     scripted_offset_east_m: float = _setting("SCRIPTED_OFFSET_EAST_M", _REAL, 0.5)
     scripted_offset_north_m: float = _setting("SCRIPTED_OFFSET_NORTH_M", _REAL, 3.0)
@@ -80,6 +85,10 @@ class Settings:
     @property
     def fusion_spread_s(self) -> float:
         return self.fusion_spread_ms / 1000
+
+    @property
+    def track_timeout_s(self) -> float:
+        return self.track_timeout_ms / 1000
 
 
 def _parse(variable: str, kind: str | None, raw: str) -> str | int | float:
