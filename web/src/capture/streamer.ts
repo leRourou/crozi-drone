@@ -20,9 +20,13 @@ const WAV_HEADER_BYTES = 44;
 const PING_PERIOD_MS = 2000;
 /** Au-delà de ~5 s d'audio en attente dans la WebSocket, le réseau ne suit plus le temps réel. */
 const MAX_BUFFERED_BYTES = 5 * 48_000 * 2;
+/** Fermeture 1008 : le serveur a refusé la session ; réessayer reproduirait le refus. */
+const CLOSE_POLICY_VIOLATION = 1008;
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 30_000;
 
 export type LogLevel = "info" | "warn" | "error";
-export type State = "idle" | "starting" | "streaming" | "error";
+export type State = "idle" | "starting" | "streaming" | "reconnecting" | "error";
 export interface Status {
   state: State;
   profile?: ProfileId;
@@ -55,7 +59,11 @@ export interface StreamerEvents {
 }
 
 type EndReason = StopReason | "network_too_slow";
-type Outcome = EndReason | "error" | "disconnect";
+type Outcome = EndReason | "error" | "rejected" | "disconnect";
+/** Fins dues au réseau : une nouvelle session a une chance de réussir. */
+const RETRYABLE: ReadonlySet<Outcome> = new Set(["disconnect", "network_too_slow"]);
+/** Fins avec end_ack : la session est complète et vérifiée. */
+const CLEAN: ReadonlySet<Outcome> = new Set(["manual", "limit", "network_too_slow"]);
 
 interface ServerStats {
   packets_per_s: number;
@@ -102,7 +110,7 @@ class Session {
   constructor(
     private readonly deps: StreamerDeps,
     private readonly events: StreamerEvents,
-    private readonly onFinished: (outcome: Outcome) => void,
+    private readonly onFinished: (outcome: Outcome, reachedReady: boolean) => void,
     private readonly restartedAt: number | null,
     private readonly profile: ProfileId,
   ) {
@@ -264,7 +272,8 @@ class Session {
   private closed(code: number): void {
     if (this.done) return;
     this.capture.dispose();
-    this.finish("disconnect", `ws_closed code=${code} — capture arrêtée`);
+    const outcome = code === CLOSE_POLICY_VIOLATION ? "rejected" : "disconnect";
+    this.finish(outcome, `ws_closed code=${code} — capture arrêtée`);
   }
 
   private finish(outcome: Outcome, errorText?: string): void {
@@ -273,14 +282,24 @@ class Session {
     if (this.pinger !== null) clearInterval(this.pinger);
     if (errorText) this.events.log(errorText, "error");
     this.socket.close();
-    this.onFinished(outcome);
+    this.onFinished(outcome, this.ready);
   }
 }
 
-/** Démarre/arrête les sessions et relance automatiquement après la limite du module (~175 s). */
+/** Délai avant une reconnexion, après `failures` échecs sans ready : 1, 2, 4… plafonné à 30 s. */
+export function reconnectDelayMs(failures: number): number {
+  return Math.min(RECONNECT_BASE_MS * 2 ** failures, RECONNECT_MAX_MS);
+}
+
+/**
+ * Démarre/arrête les sessions. Relance immédiatement après la limite du module (~175 s) et
+ * reconnecte avec un délai croissant après une fin due au réseau. Chaque relance = nouvelle session.
+ */
 export class Streamer {
   private session: Session | null = null;
   private active = false;
+  private failures = 0;
+  private retry: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly deps: StreamerDeps,
@@ -296,30 +315,54 @@ export class Streamer {
       return;
     }
     this.active = true;
+    this.failures = 0;
     this.events.status({ state: "starting", profile });
     this.open(null, profile);
   }
 
   stop(): void {
     this.active = false;
-    this.session?.stop();
+    if (this.retry === null) {
+      this.session?.stop();
+      return;
+    }
+    clearTimeout(this.retry);
+    this.retry = null;
+    this.events.status({ state: "idle" });
   }
 
   private open(restartedAt: number | null, profile: ProfileId): void {
-    const onFinished = (outcome: Outcome) => this.finished(outcome, profile);
+    const onFinished = (outcome: Outcome, reachedReady: boolean) => this.finished(outcome, reachedReady, profile);
     this.session = new Session(this.deps, this.events, onFinished, restartedAt, profile);
   }
 
   /** profile : celui de la session terminée, repris tel quel par la relance. */
-  private finished(outcome: Outcome, profile: ProfileId): void {
-    if (outcome === "limit" && this.active) {
+  private finished(outcome: Outcome, reachedReady: boolean, profile: ProfileId): void {
+    this.session = null;
+    if (reachedReady) this.failures = 0;
+    if (this.active && outcome === "limit") {
       this.events.log("limite du module (~175 s) atteinte : nouvelle session, trou assumé", "warn");
       this.open(this.deps.now(), profile);
       return;
     }
+    if (this.active && RETRYABLE.has(outcome)) {
+      this.scheduleReconnect(profile);
+      return;
+    }
     this.active = false;
-    this.session = null;
-    const clean = outcome === "manual" || outcome === "limit"; // fin propre voulue par l'utilisateur
-    this.events.status({ state: clean ? "idle" : "error" });
+    this.events.status({ state: CLEAN.has(outcome) ? "idle" : "error" });
+  }
+
+  private scheduleReconnect(profile: ProfileId): void {
+    const delay = reconnectDelayMs(this.failures);
+    this.failures += 1;
+    const droppedAt = this.deps.now(); // gap_ms de la session suivante = trou réel
+    this.events.log(`reconnexion dans ${delay / 1000} s (tentative ${this.failures})`, "warn");
+    this.events.status({ state: "reconnecting", profile });
+    this.retry = setTimeout(() => {
+      this.retry = null;
+      this.events.status({ state: "starting", profile });
+      this.open(droppedAt, profile);
+    }, delay);
   }
 }

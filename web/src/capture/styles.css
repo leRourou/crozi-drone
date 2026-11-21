@@ -54,7 +54,8 @@ h1 {
 .badge.streaming {
   color: var(--ok);
 }
-.badge.starting {
+.badge.starting,
+.badge.reconnecting {
   color: var(--warn);
 }
 .badge.error {

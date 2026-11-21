@@ -26,6 +26,7 @@ const WEBKIT_WARNING =
 const STATE_LABEL: Record<Status["state"], string> = {
   idle: "Prêt",
   starting: "Connexion…",
+  reconnecting: "Reconnexion…",
   streaming: "Enregistrement",
   error: "Erreur",
 };
@@ -175,7 +176,7 @@ export function App() {
 
   useEffect(() => () => streamer.stop(), [streamer]);
 
-  const running = status.state === "starting" || status.state === "streaming";
+  const running = status.state === "starting" || status.state === "streaming" || status.state === "reconnecting";
   const webkit = status.webkit ?? expected.webkit;
   const lastError = status.state === "error" ? lines.findLast((l) => l.level === "error") : undefined;
   const goTo = (profile?: Profile) => {

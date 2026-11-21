@@ -186,15 +186,28 @@ describe("Streamer", () => {
     expect(env.statuses.at(-1)).toMatchObject({ state: "error" });
   });
 
-  it("an unexpected socket close stops the capture without restarting", async () => {
+  it("an unexpected socket close stops the capture and reconnects a new session after 1 s", async () => {
     const env = setup();
     env.streamer.start("axel");
     await connect(env);
     env.sockets[0].drop(1006);
     expect(env.captures[0].disposed).toBe(true);
     expect(env.logText()).toContain("ws_closed code=1006");
-    expect(env.statuses.at(-1)).toMatchObject({ state: "error" });
+    expect(env.statuses.at(-1)).toEqual({ state: "reconnecting", profile: "axel" });
+    expect(env.logs).toContainEqual({ text: "reconnexion dans 1 s (tentative 1)", level: "warn" });
+    await vi.advanceTimersByTimeAsync(999);
     expect(env.captures).toHaveLength(1);
+    env.clock.now = 2000;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(env.captures).toHaveLength(2);
+    env.clock.now = 2100;
+    await connect(env, 1);
+    expect(env.sockets[1].texts()[0]).toMatchObject({
+      session_id: "00000000-0000-4000-8000-000000000001",
+      profile: "axel",
+    });
+    expect(env.logText()).toMatch(/ gap_ms=1100$/m); // trou réel : depuis la coupure
+    expect(env.statuses.at(-1)).toMatchObject({ state: "streaming" });
   });
 
   it("a socket that never opens disposes the capture", async () => {
@@ -204,7 +217,7 @@ describe("Streamer", () => {
     env.sockets[0].drop(1006);
     await tick();
     expect(env.captures[0].disposed).toBe(true);
-    expect(env.statuses.at(-1)).toMatchObject({ state: "error" });
+    expect(env.statuses.at(-1)).toMatchObject({ state: "reconnecting" });
   });
 
   it("a server error is logged", async () => {
@@ -366,5 +379,97 @@ describe("Streamer lifecycle", () => {
   it("stop before any start is harmless", () => {
     const env = setup();
     expect(() => env.streamer.stop()).not.toThrow();
+  });
+});
+
+/** Fait échouer la session `index` avant ready (serveur injoignable). */
+async function failBeforeReady(env: ReturnType<typeof setup>, index: number) {
+  env.captures[index].grant();
+  env.sockets[index].drop(1006);
+  await tick();
+}
+
+describe("Streamer reconnection", () => {
+  it("doubles the delay after each failed attempt, up to 30 s", async () => {
+    const env = setup();
+    env.streamer.start("axel");
+    const delays: number[] = [];
+    for (let i = 0; i < 7; i++) {
+      await failBeforeReady(env, i);
+      let waited = 0;
+      while (env.captures.length === i + 1) {
+        await vi.advanceTimersByTimeAsync(1000);
+        waited += 1000;
+      }
+      delays.push(waited / 1000);
+    }
+    expect(delays).toEqual([1, 2, 4, 8, 16, 30, 30]);
+  });
+
+  it("resets the delay to 1 s once a session has reached ready", async () => {
+    const env = setup();
+    env.streamer.start("axel");
+    await failBeforeReady(env, 0);
+    await vi.advanceTimersByTimeAsync(1000);
+    await failBeforeReady(env, 1);
+    await vi.advanceTimersByTimeAsync(2000);
+    await connect(env, 2);
+    env.sockets[2].drop(1006);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(env.captures).toHaveLength(4);
+  });
+
+  it("stop during the wait cancels the reconnection", async () => {
+    const env = setup();
+    env.streamer.start("axel");
+    await connect(env);
+    env.sockets[0].drop(1006);
+    env.streamer.stop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(env.captures).toHaveLength(1);
+    expect(env.statuses.at(-1)).toEqual({ state: "idle" });
+    env.streamer.start("axel");
+    expect(env.captures).toHaveLength(2);
+    await failBeforeReady(env, 1);
+    await vi.advanceTimersByTimeAsync(1000); // nouveau départ : délai repart de 1 s
+    expect(env.captures).toHaveLength(3);
+  });
+
+  it("does not reconnect when the server refuses the session (close 1008)", async () => {
+    const env = setup();
+    env.streamer.start("axel");
+    await connect(env);
+    env.sockets[0].receive({ type: "error", code: "unknown_profile", message: "x" });
+    env.sockets[0].drop(1008);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(env.captures).toHaveLength(1);
+    expect(env.statuses.at(-1)).toEqual({ state: "error" });
+  });
+
+  it("reconnects after a network_too_slow end_ack", async () => {
+    const env = setup();
+    env.streamer.start("axel");
+    await connect(env);
+    env.sockets[0].bufferedAmount = 480_001;
+    env.captures[0].chunk(new Int16Array(2400));
+    await tick();
+    env.sockets[0].receive({ type: "end_ack", frames_received: 2400, pcm_sha256: "x", match: true, profile: "axel" });
+    expect(env.statuses.at(-1)).toMatchObject({ state: "reconnecting" });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(env.captures).toHaveLength(2);
+  });
+
+  it("a stop during a network_too_slow end leaves the phone idle, not reconnecting", async () => {
+    const env = setup();
+    env.streamer.start("axel");
+    await connect(env);
+    env.sockets[0].bufferedAmount = 480_001;
+    env.captures[0].chunk(new Int16Array(2400));
+    env.streamer.stop();
+    await tick();
+    env.sockets[0].receive({ type: "end_ack", frames_received: 2400, pcm_sha256: "x", match: true, profile: "axel" });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(env.captures).toHaveLength(1);
+    expect(env.statuses.at(-1)).toEqual({ state: "idle" });
   });
 });

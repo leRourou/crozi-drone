@@ -88,7 +88,18 @@ Codes d'erreur : `invalid_hello`, `unknown_protocol`, `unknown_profile`, `unknow
 
 Ces mesures sont du diagnostic : elles ne modifient jamais les octets reçus ou enregistrés.
 
+## Relances côté client
+
+Chaque relance ouvre une nouvelle capture et une nouvelle session (nouvel UUID) ; le log
+`micro ok … gap_ms=` donne le trou réel depuis la fin de la session précédente.
+
+| Fin de session | Suite |
+| --- | --- |
+| `limit` | relance immédiate |
+| coupure WebSocket (hors 1008), `network_too_slow` | reconnexion après 1, 2, 4, 8, 16 puis 30 s (plafond), sans limite d'essais ; le délai repart de 1 s dès qu'une session reçoit `ready` |
+| refus serveur (fermeture 1008), erreur du module, micro refusé | arrêt, état erreur, aucune relance |
+
+Le bouton Arrêter annule une reconnexion en attente.
+
 ## Évolutions prévues (non implémentées)
-- `reason: "network_too_slow"` (arrêt si `bufferedAmount` > ~5 s d'audio) et reconnexion avec
-  délai croissant.
 - Importer les validateurs de `collector/contract.py` quand il sera extrait du collecteur.
