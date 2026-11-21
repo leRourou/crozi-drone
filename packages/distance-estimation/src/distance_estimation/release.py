@@ -18,6 +18,7 @@ from typing import Any, Protocol
 
 import dsp
 import joblib
+import ml
 import numpy as np
 import pandas as pd
 
@@ -26,6 +27,8 @@ from distance_estimation.stream import TRANSPORT_RATE, Ready, Stream, Windowing
 CONTRACT = "edth.model-release.v1"
 TRANSPORT = {"rate_hz": TRANSPORT_RATE, "format": "pcm_s16le", "channels": 1}
 PARITY_FILE = "parity/fixture.json"
+# Code figé embarqué par la release : l'appli importe exactement ces fichiers (packages/features).
+FROZEN = {"frozen/dsp.py": Path(dsp.__file__), "frozen/ml.py": Path(ml.__file__)}
 # Parité : features identiques (même code, décimation invariante par blocs) ; scores à l'écart
 # flottant près (le CNN est évalué par lots hors ligne, fenêtre par fenêtre en live).
 FEATURE_ATOL, DECISION_ATOL = 1e-9, 1e-6
@@ -69,11 +72,13 @@ class _Manifest:
     threshold: float
     detection_file: str
     distance_file: str
+    frozen: Mapping[str, Any]
 
 
 def load_release(root: Path) -> Release:
     root = Path(root)
     manifest = parse_manifest(json.loads(_bundle_file(root, "manifest.json").read_text("utf-8")))
+    _check_frozen(root, manifest.frozen)  # avant les pickles : ils exécutent le code de ml.py
     release = Release(
         manifest.name,
         manifest.windowing,
@@ -92,6 +97,23 @@ def _bundle_file(root: Path, name: str) -> Path:
     if not path.is_file():
         raise ValueError(f"fichier absent du bundle : {name}")
     return path
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _check_frozen(root: Path, files: Mapping[str, Any]) -> None:
+    for name, app_copy in FROZEN.items():
+        if name not in files:
+            raise ValueError(f"manifeste : frozen.files ne liste pas {name}")
+        if _sha256(_bundle_file(root, name)) != files[name]:
+            raise ValueError(f"{name} : empreinte différente de celle du manifeste")
+        if _sha256(app_copy) != files[name]:
+            raise ValueError(
+                f"{name} : la copie figée de l'appli (packages/features) n'est pas celle de la "
+                "release ; recopier frozen/ du bundle et mettre à jour ses empreintes"
+            )
 
 
 def _field(data: Mapping[str, Any], dotted: str) -> Any:
@@ -134,6 +156,7 @@ def parse_manifest(data: Mapping[str, Any]) -> _Manifest:
         threshold=_threshold(_field(data, "detection.threshold")),
         detection_file=str(_field(data, "detection.file")),
         distance_file=str(_field(data, "distance.file")),
+        frozen=_field(data, "frozen.files"),
     )
 
 

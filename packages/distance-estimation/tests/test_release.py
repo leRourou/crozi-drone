@@ -86,6 +86,21 @@ def test_a_model_file_outside_the_bundle_is_refused(bundle):
     refused(bundle, "hors du bundle")
 
 
+def test_a_release_built_on_other_frozen_code_than_the_app_copy_is_refused(bundle):
+    edit(bundle, "manifest.json", lambda m: m["frozen"]["files"].update({"frozen/ml.py": "0" * 64}))
+    refused(bundle, "frozen/ml.py")
+
+
+def test_a_frozen_file_that_does_not_match_its_manifest_fingerprint_is_refused(bundle):
+    (bundle / "frozen" / "dsp.py").write_text("# modifié\n")
+    refused(bundle, "frozen/dsp.py")
+
+
+def test_a_release_must_list_both_frozen_files(bundle):
+    edit(bundle, "manifest.json", lambda m: m["frozen"]["files"].pop("frozen/dsp.py"))
+    refused(bundle, "frozen/dsp.py")
+
+
 def test_a_bundle_without_parity_set_is_refused(bundle):
     (bundle / "parity" / "fixture.json").unlink()
     refused(bundle, "parity/fixture.json")

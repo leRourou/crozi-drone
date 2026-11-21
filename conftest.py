@@ -112,6 +112,14 @@ def _fir_sha(rate):
     return None if fir is None else hashlib.sha256(fir.astype("<f8").tobytes()).hexdigest()
 
 
+def _frozen_sources():
+    """Copies figées de l'appli (packages/features) : celles que la release doit embarquer."""
+    import dsp
+    import ml
+
+    return {f"frozen/{Path(m.__file__).name}": Path(m.__file__) for m in (dsp, ml)}
+
+
 def bundle_manifest(threshold, rate=BUNDLE_RATE):
     from dsp import FLAT_COLS, n_frames
 
@@ -119,6 +127,11 @@ def bundle_manifest(threshold, rate=BUNDLE_RATE):
         "contract": "edth.model-release.v1",
         "release": "test.24k-1s.r0",
         "created_utc": "2026-11-21T20:00:00Z",
+        "frozen": {
+            "repo_commit": "ec518233128d99f83acac6fa3c9dd8581220f210",
+            "files": {name: hashlib.sha256(path.read_bytes()).hexdigest()
+                      for name, path in _frozen_sources().items()},
+        },
         "input": {
             "transport": {"rate_hz": 48000, "format": "pcm_s16le", "channels": 1},
             "model_rate_hz": rate,
@@ -167,6 +180,9 @@ def write_model_bundle(root, pcm=None, seed=3):
     for sub, model in (("detection", cnn), ("distance", mlp)):
         (root / sub).mkdir(parents=True, exist_ok=True)
         joblib.dump(model, root / sub / "model.joblib")
+    (root / "frozen").mkdir(exist_ok=True)
+    for name, path in _frozen_sources().items():
+        (root / name).write_bytes(path.read_bytes())
     (root / "parity").mkdir(exist_ok=True)
     (root / "parity" / "fixture.json").write_text(json.dumps(fixture))
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2))
