@@ -9,12 +9,13 @@ from starlette.websockets import WebSocketDisconnect
 
 from api.main import create_app
 from api.profiles import load_profiles
+from api.settings import Settings
 from conftest import make_hello, packet, sine
 
 
-def fresh_app(estimator="none"):
+def fresh_app(**settings):
     """Une application neuve par test : le registre d'état ne fuit pas d'un test à l'autre."""
-    return create_app(None, load_profiles(), estimator)
+    return create_app(None, load_profiles(), Settings(**settings))
 
 
 @pytest.fixture
@@ -253,7 +254,7 @@ def test_a_newer_session_on_the_same_phone_stops_the_older_one():
 
 
 def test_the_scripted_estimator_reports_a_detection_per_received_window():
-    with TestClient(fresh_app("scripted")) as client:
+    with TestClient(fresh_app(estimator="scripted")) as client:
         assert phone_state(client, "tristan")["detection"] is None
         with client.websocket_connect("/ws/audio") as ws:
             open_session(ws, make_hello(profile="tristan"))
@@ -265,6 +266,20 @@ def test_the_scripted_estimator_reports_a_detection_per_received_window():
     assert detection["drone"] is (detection["distance_m"] is not None)
 
 
-def test_an_unknown_estimator_refuses_to_start():
-    with pytest.raises(ValueError, match="DISTANCE_ESTIMATOR"):
-        create_app(None, load_profiles(), estimator="model")
+def test_state_is_pushed_every_state_period():
+    with TestClient(fresh_app(state_period_ms=20)) as client, client.websocket_connect(
+        "/ws/state"
+    ) as ws:
+        times = [ws.receive_json()["server_time"] for _ in range(3)]
+    assert 0.015 <= times[2] - times[1] < 0.5
+
+
+def test_a_window_is_estimated_as_soon_as_it_is_complete():
+    app = fresh_app(estimator="scripted", window_ms=100)
+    with TestClient(app) as client, client.websocket_connect("/ws/audio") as ws:
+        open_session(ws, make_hello(profile="noe"))
+        send_audio(ws, sine(seconds=0.1), size=4800)
+        ws.send_text(json.dumps({"type": "ping", "t": 1}))
+        receive_until(ws, "pong")
+        detection = phone_state(client, "noe")["detection"]
+    assert detection is not None

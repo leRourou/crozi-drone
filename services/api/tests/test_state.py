@@ -3,6 +3,7 @@
 import pytest
 
 from api.profiles import Profile
+from api.settings import Settings
 from api.state import PhoneRegistry
 from distance_estimation.estimator import DistanceEstimate, Range
 
@@ -24,7 +25,7 @@ def start(registry, profile="noe", sid="s1", now=0.0, replaced=None):
 
 @pytest.fixture
 def registry():
-    return PhoneRegistry(PROFILES, estimator="scripted")
+    return PhoneRegistry(PROFILES, Settings(estimator="scripted"))
 
 
 def test_every_contract_phone_is_listed_never_seen_before_any_session(registry):
@@ -129,3 +130,14 @@ def test_a_new_session_on_another_phone_replaces_nothing(registry):
     start(registry, "noe", replaced=lambda: replaced.append("noe"))
     start(registry, "tristan")
     assert replaced == []
+
+
+def test_thresholds_come_from_the_settings():
+    settings = Settings(estimator="scripted", stale_after_ms=500, detection_fresh_ms=300)
+    registry = PhoneRegistry(PROFILES, settings)
+    session = start(registry)
+    session.estimate(DistanceEstimate("noe", 0.0, None), now=0.0)
+    assert phone(registry, "noe", 0.3)["detection"]["fresh"] is True
+    assert phone(registry, "noe", 0.31)["detection"]["fresh"] is False
+    assert phone(registry, "noe", 0.5)["status"] == "streaming"
+    assert phone(registry, "noe", 0.51)["status"] == "stale"

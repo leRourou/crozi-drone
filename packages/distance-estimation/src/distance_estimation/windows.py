@@ -5,13 +5,13 @@ from __future__ import annotations
 from distance_estimation.estimator import AudioWindow
 
 SAMPLE_BYTES = 2
-WINDOW_FRAMES = 24_000  # 500 ms à 48 kHz ; à aligner sur l'entrée du futur modèle
 
 
 class WindowAccumulator:
-    """Un accumulateur par session : une nouvelle session repart d'un tampon vide."""
+    """Un accumulateur par session : une nouvelle session repart d'un tampon vide.
+    frames : taille d'une fenêtre en échantillons, fixée par l'appelant (réglage du service)."""
 
-    def __init__(self, profile: str, session_id: str, frames: int = WINDOW_FRAMES) -> None:
+    def __init__(self, profile: str, session_id: str, frames: int) -> None:
         self._profile = profile
         self._session_id = session_id
         self._size = frames * SAMPLE_BYTES

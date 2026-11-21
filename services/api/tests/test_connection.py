@@ -9,6 +9,7 @@ import pytest
 from api import main
 from api.main import Connection
 from api.profiles import load_profiles
+from api.settings import Settings
 from api.state import PhoneRegistry
 from conftest import make_hello, packet
 
@@ -55,7 +56,7 @@ def fast_stats(monkeypatch):
 
 def run(ws, settle=0.1):
     async def scenario():
-        connection = Connection(ws, PhoneRegistry(load_profiles(), "none"))
+        connection = Connection(ws, PhoneRegistry(load_profiles(), Settings()))
         await asyncio.wait_for(connection.run(), timeout=1.0)
         await asyncio.sleep(settle)  # laisse une éventuelle boucle fantôme se manifester
 
@@ -92,7 +93,7 @@ def test_stats_are_sent_while_idle():
     ws = FakeWebSocket([text(make_hello())])
 
     async def scenario():
-        task = asyncio.create_task(Connection(ws, PhoneRegistry(load_profiles(), "none")).run())
+        task = asyncio.create_task(Connection(ws, PhoneRegistry(load_profiles(), Settings())).run())
         await asyncio.sleep(0.07)
         await ws.incoming.put(DISCONNECT)
         await asyncio.wait_for(task, timeout=1.0)

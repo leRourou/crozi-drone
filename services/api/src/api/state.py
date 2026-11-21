@@ -12,10 +12,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from api.profiles import Profile
+from api.settings import Settings
 from distance_estimation.estimator import DistanceEstimate
-
-STALE_AFTER_S = 1.0  # plus de paquet depuis plus longtemps : réseau qui décroche
-DETECTION_FRESH_S = 2.0  # au-delà, une distance n'est plus représentative d'un drone en vol
 
 
 @dataclass
@@ -64,7 +62,9 @@ class PhoneSession:
             self._registry._last_seen[self.profile] = now
 
 
-def _detection_view(detection: _Detection | None, now: float) -> dict[str, Any] | None:
+def _detection_view(
+    detection: _Detection | None, now: float, fresh_s: float
+) -> dict[str, Any] | None:
     if detection is None:
         return None
     rng = detection.estimate.range
@@ -74,20 +74,22 @@ def _detection_view(detection: _Detection | None, now: float) -> dict[str, Any] 
         "distance_m": rng.distance_m if rng else None,
         "uncertainty_rel": rng.uncertainty_rel if rng else None,
         "age_s": age,
-        "fresh": age <= DETECTION_FRESH_S,
+        "fresh": age <= fresh_s,
     }
 
 
-def _status(session: PhoneSession | None, last_seen: float | None, now: float) -> str:
+def _status(
+    session: PhoneSession | None, last_seen: float | None, now: float, stale_s: float
+) -> str:
     if session is not None:
-        return "streaming" if now - last_seen <= STALE_AFTER_S else "stale"
+        return "streaming" if now - last_seen <= stale_s else "stale"
     return "never_seen" if last_seen is None else "offline"
 
 
 class PhoneRegistry:
-    def __init__(self, profiles: tuple[Profile, ...], estimator: str) -> None:
+    def __init__(self, profiles: tuple[Profile, ...], settings: Settings) -> None:
         self._profiles = profiles
-        self._estimator = estimator
+        self._settings = settings
         self._live: dict[str, PhoneSession] = {}
         self._last_seen: dict[str, float] = {}
 
@@ -119,13 +121,17 @@ class PhoneRegistry:
             "profile": profile.id,
             "label": profile.label,
             "position_m": {"x": profile.x_m, "y": profile.y_m, "z": profile.z_m},
-            "status": _status(session, last_seen, now),
+            "status": _status(session, last_seen, now, self._settings.stale_after_s),
             "session_id": session.session_id if session else None,
             "contract": session.contract if session else None,
             "last_seen_age_s": now - last_seen if last_seen is not None else None,
             "rt_ratio": session.rt_ratio if session else None,
             "rms_dbfs": session.rms_dbfs if session else None,
-            "detection": _detection_view(session.detection, now) if session else None,
+            "detection": (
+                _detection_view(session.detection, now, self._settings.detection_fresh_s)
+                if session
+                else None
+            ),
         }
 
     def snapshot(self, now: float, server_time: float) -> dict[str, Any]:
@@ -133,7 +139,7 @@ class PhoneRegistry:
         return {
             "type": "state",
             "server_time": server_time,
-            "estimator": self._estimator,
+            "estimator": self._settings.estimator,
             "phones": [self._phone(p, now) for p in self._profiles],
             "drone": None,
         }

@@ -8,7 +8,7 @@ import contextlib
 import logging
 import os
 import time
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.logfmt import kv, short_browser
 from api.profiles import Profile, load_profiles
+from api.settings import Settings, load_settings
 from api.state import PhoneRegistry, PhoneSession
 from audio_capture.protocol import (
     End,
@@ -35,7 +36,6 @@ from distance_estimation.scripted import ScriptedEstimator
 from distance_estimation.windows import WindowAccumulator
 
 STATS_PERIOD_S = 1.0
-STATE_PERIOD_S = 1.0
 POLICY_VIOLATION = 1008
 DEFAULT_RECORDINGS = Path(
     "recordings"
@@ -50,13 +50,20 @@ log = logging.getLogger("crozidrone.audio")
 _REPLACED: dict[str, Any] = {"type": "crozidrone.replaced"}
 
 
-def make_estimator(name: str, profiles: tuple[Profile, ...]) -> DistanceEstimator | None:
-    """DISTANCE_ESTIMATOR : none (défaut, aucun faux drone affiché) ou scripted (mock de ②)."""
-    if name == "none":
+@dataclass(frozen=True)
+class Estimation:
+    """② actif : l'estimateur et la taille des fenêtres qu'il reçoit (pas l'un sans l'autre)."""
+
+    estimator: DistanceEstimator
+    window_frames: int
+
+
+def make_estimation(settings: Settings, profiles: tuple[Profile, ...]) -> Estimation | None:
+    """None quand DISTANCE_ESTIMATOR=none : aucune détection, donc aucun faux drone affiché."""
+    if settings.estimator == "none":
         return None
-    if name == "scripted":
-        return ScriptedEstimator({p.id: (p.x_m, p.y_m, p.z_m) for p in profiles})
-    raise ValueError(f"DISTANCE_ESTIMATOR must be 'none' or 'scripted', got {name!r}")
+    positions = {p.id: (p.x_m, p.y_m, p.z_m) for p in profiles}
+    return Estimation(ScriptedEstimator(positions), settings.window_frames)
 
 
 def _recorder_for(hello: Hello) -> WavRecorder | None:
@@ -132,11 +139,11 @@ class Connection:
         self,
         ws: WebSocket,
         registry: PhoneRegistry,
-        estimator: DistanceEstimator | None = None,
+        estimation: Estimation | None = None,
     ) -> None:
         self.ws = ws
         self.registry = registry
-        self.estimator = estimator
+        self.estimation = estimation
         self.phone: PhoneSession | None = None
         self.windows: WindowAccumulator | None = None
         self.inbox: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -200,8 +207,9 @@ class Connection:
         self.phone = self.registry.start(
             hello.profile, session_id, hello.contract, self._replaced, now
         )
-        if self.estimator is not None:
-            self.windows = WindowAccumulator(hello.profile, session_id)
+        if self.estimation is not None:
+            frames = self.estimation.window_frames
+            self.windows = WindowAccumulator(hello.profile, session_id, frames)
         _log_start(self.sid, hello)
 
     def _replaced(self) -> None:
@@ -211,7 +219,7 @@ class Connection:
         if self.windows is None:
             return
         for window in self.windows.add(pcm, time.time()):
-            self.phone.estimate(self.estimator.estimate(window), now)
+            self.phone.estimate(self.estimation.estimator.estimate(window), now)
 
     async def _stream(self) -> None:
         next_tick = time.monotonic() + STATS_PERIOD_S
@@ -284,16 +292,16 @@ class Connection:
         )
 
 
-async def _push_state(ws: WebSocket, registry: PhoneRegistry) -> None:
+async def _push_state(ws: WebSocket, registry: PhoneRegistry, period_s: float) -> None:
     while True:
         await ws.send_json(registry.snapshot(time.monotonic(), time.time()))
-        await asyncio.sleep(STATE_PERIOD_S)
+        await asyncio.sleep(period_s)
 
 
-async def _serve_state(ws: WebSocket, registry: PhoneRegistry) -> None:
-    """Envoie l'état tout de suite puis chaque seconde, jusqu'à la déconnexion du client."""
+async def _serve_state(ws: WebSocket, registry: PhoneRegistry, period_s: float) -> None:
+    """Envoie l'état tout de suite puis toutes les STATE_PERIOD_MS, jusqu'à la déconnexion."""
     await ws.accept()
-    pusher = asyncio.create_task(_push_state(ws, registry))
+    pusher = asyncio.create_task(_push_state(ws, registry, period_s))
     try:
         while (await ws.receive())["type"] != "websocket.disconnect":
             pass
@@ -302,19 +310,20 @@ async def _serve_state(ws: WebSocket, registry: PhoneRegistry) -> None:
 
 
 def create_app(
-    front_dir: Path | None, profiles: tuple[Profile, ...], estimator: str = "none"
+    front_dir: Path | None, profiles: tuple[Profile, ...], settings: Settings | None = None
 ) -> FastAPI:
     """front_dir : build Vite servi à la racine (même origine que /ws/audio), ou None (dev).
     profiles : contrat contracts/profiles.json, chargé une fois au démarrage.
-    estimator : nom de l'estimateur de distance (voir make_estimator)."""
-    distance_estimator = make_estimator(estimator, profiles)
-    registry = PhoneRegistry(profiles, estimator)
+    settings : réglages du temps réel (load_settings lit l'environnement)."""
+    settings = settings or Settings()
+    estimation = make_estimation(settings, profiles)
+    registry = PhoneRegistry(profiles, settings)
 
     async def audio_stream(ws: WebSocket) -> None:
-        await Connection(ws, registry, distance_estimator).run()
+        await Connection(ws, registry, estimation).run()
 
     async def state_stream(ws: WebSocket) -> None:
-        await _serve_state(ws, registry)
+        await _serve_state(ws, registry, settings.state_period_s)
 
     application = FastAPI(title="Crozidrone audio stream")
     application.add_api_websocket_route("/ws/audio", audio_stream)
@@ -328,5 +337,5 @@ _front_dir = os.environ.get("FRONT_DIR")
 app = create_app(
     Path(_front_dir) if _front_dir else None,
     load_profiles(),
-    os.environ.get("DISTANCE_ESTIMATOR", "none"),
+    load_settings(),
 )

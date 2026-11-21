@@ -82,7 +82,7 @@ brutale), et deux onglets ouverts sur le même profil ne se relancent pas l'un l
 
 ## État général : `/ws/state` (serveur → client, lecture seule)
 
-À la connexion puis chaque seconde, le serveur envoie l'état de tous les téléphones du contrat, dans
+À la connexion puis toutes les `STATE_PERIOD_MS` (250 ms par défaut), le serveur envoie l'état de tous les téléphones du contrat, dans
 l'ordre de `contracts/profiles.json`. Les messages du client sont ignorés.
 
 ```json
@@ -96,21 +96,33 @@ l'ordre de `contracts/profiles.json`. Les messages du client sont ignorés.
 
 | `status` | Condition |
 | --- | --- |
-| `streaming` | session ouverte, dernier paquet il y a ≤ 1 s |
-| `stale` | session ouverte, aucun paquet depuis plus de 1 s |
+| `streaming` | session ouverte, dernier paquet il y a ≤ `STALE_AFTER_MS` (1 s par défaut) |
+| `stale` | session ouverte, aucun paquet depuis plus de `STALE_AFTER_MS` |
 | `offline` | aucune session ouverte ; `last_seen_age_s` = temps écoulé depuis la dernière activité |
 | `never_seen` | aucune session depuis le démarrage du serveur |
 
 `session_id`, `contract`, `rt_ratio`, `rms_dbfs` et `detection` valent `null` hors session.
 `rt_ratio` et `rms_dbfs` restent `null` jusqu'aux premières statistiques.
 
-`detection` vaut `null` sans estimateur (`estimator: "none"`) ou avant la première fenêtre de 500 ms.
+`detection` vaut `null` sans estimateur (`estimator: "none"`) ou avant la première fenêtre complète
+(`DISTANCE_WINDOW_MS`, 250 ms par défaut : une estimation par fenêtre, fenêtres contiguës).
 Sinon : `{"drone": bool, "distance_m": float|null, "uncertainty_rel": float|null, "age_s": float,
 "fresh": bool}`. `distance_m` et `uncertainty_rel` ne sont présents que si `drone` est vrai.
-`fresh` est vrai si la détection a ≤ 2 s.
+`fresh` est vrai si la détection a ≤ `DETECTION_FRESH_MS` (2 s par défaut).
 
 L'estimateur se choisit avec `DISTANCE_ESTIMATOR` : `none` par défaut, ou `scripted` (mock de ②, drone
-virtuel sur une trajectoire connue). Toute autre valeur empêche le serveur de démarrer.
+virtuel sur une trajectoire connue).
+
+| Variable | Défaut | Rôle |
+| --- | --- | --- |
+| `DISTANCE_ESTIMATOR` | `none` | `none` ou `scripted` |
+| `DISTANCE_WINDOW_MS` | 250 | taille d'une fenêtre analysée par ② |
+| `STATE_PERIOD_MS` | 250 | intervalle entre deux messages `state` |
+| `STALE_AFTER_MS` | 1000 | seuil `streaming` → `stale` |
+| `DETECTION_FRESH_MS` | 2000 | âge maximal d'une détection `fresh` |
+
+Les durées sont des entiers strictement positifs en millisecondes. Une valeur invalide empêche le serveur
+de démarrer (message d'erreur nommant la variable).
 `drone` (position estimée) reste `null` tant que ③ n'est pas branché.
 
 ## Enregistrement (`SAVE_SESSIONS=1`)

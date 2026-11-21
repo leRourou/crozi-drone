@@ -1,14 +1,10 @@
 """Découpage du PCM d'une session en fenêtres contiguës de taille fixe."""
 
-from distance_estimation.windows import WINDOW_FRAMES, WindowAccumulator
+from distance_estimation.windows import WindowAccumulator
 
 
 def pcm(frames, value=0):
     return int(value).to_bytes(2, "little", signed=True) * frames
-
-
-def test_a_window_is_half_a_second_at_48_khz():
-    assert WINDOW_FRAMES == 24_000
 
 
 def test_no_window_until_enough_samples_arrived():

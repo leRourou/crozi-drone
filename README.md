@@ -31,4 +31,5 @@ Détails : [protocole](docs/protocol.md) · [contrat de capture](docs/audio-capt
 `display.html` (à ouvrir sur le PC de supervision) affiche chaque téléphone du contrat : connecté ou non,
 drone détecté ou non, et à quelle distance. Les données viennent de `/ws/state`. En attendant le modèle,
 `DISTANCE_ESTIMATOR=scripted` simule un drone virtuel sur une trajectoire connue (bandeau « Estimateur
-simulé ») ; par défaut (`none`), aucune détection n'est affichée.
+simulé ») ; par défaut (`none`), aucune détection n'est affichée. L'état est rafraîchi toutes les 250 ms
+(réglages en variables d'environnement : voir [protocole](docs/protocol.md)).

@@ -28,6 +28,8 @@ Contrat de capture : `docs/audio-capture-contract.md`. Protocole : `docs/protoco
 uv sync --all-packages && uv run ruff check && uv run pytest
 SAVE_SESSIONS=1 uv run uvicorn api.main:app --port 8000     # écrit ./recordings/
 DISTANCE_ESTIMATOR=scripted uv run uvicorn api.main:app --port 8000  # drone virtuel (défaut : none)
+# réglages temps réel (ms) : DISTANCE_WINDOW_MS=250 STATE_PERIOD_MS=250 STALE_AFTER_MS=1000
+# DETECTION_FRESH_MS=2000 — lus et validés par services/api/settings.py (docs/protocol.md)
 # front (HTTPS fourni par ngrok / Tailscale Serve devant le port Vite)
 cd web && npm install && npm test && npm run build
 cd web && npm run dev
@@ -43,9 +45,10 @@ Arborescence : un package Python par module, assemblés par `services/api`.
 packages/audio-capture/   ① récupération du son : protocol.py (validation à la frontière),
                              session.py (seq + SHA), stats.py (diagnostic), recording.py
 packages/distance-estimation/ ② son → distance : estimator.py (interface AudioWindow → DistanceEstimate,
-                             range None = pas de drone), windows.py (fenêtres de 500 ms d'une session),
+                             range None = pas de drone), windows.py (fenêtres contiguës d'une session),
                              scripted.py (mock : drone virtuel sur un cercle, vraie distance)
-services/api/             main.py (/ws/audio, /ws/state, create_app, make_estimator, logs `event=… clé=valeur`),
+services/api/             main.py (/ws/audio, /ws/state, create_app, make_estimation, logs `event=… clé=valeur`),
+                             settings.py (seul lecteur des variables d'environnement du temps réel),
                              state.py (PhoneRegistry : état par téléphone, la session la plus récente gagne),
                              logfmt.py, profiles.py (charge et valide contracts/profiles.json au démarrage)
 contracts/profiles.json   seule source des téléphones (id, libellé, position x ; y ; z en mètres) pour Python et TS
@@ -68,6 +71,8 @@ Règle : un module n'importe jamais un autre module ; seul `services/api` les as
 - Lot 2 fait : `network_too_slow`, reconnexion avec délai croissant (`docs/protocol.md`), Wake Lock.
 - Lot 3 fait : z = 0 dans le contrat, mock de ② (`DISTANCE_ESTIMATOR=scripted`), `/ws/state` + page d'état,
   `session_replaced`.
+- Tout se fait en temps réel : pas de stockage d'historique ni de rejeu (décision du 21/11/2026).
+  Les WAV `SAVE_SESSIONS=1` restent une option de preuve, désactivée par défaut.
 
 ## Qualité
 `~/tools/crapper/crapper`, `~/tools/dryer/dryer`, `~/tools/mutator/mutator` (composants UI purs
