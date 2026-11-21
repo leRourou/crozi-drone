@@ -1,9 +1,12 @@
 [project]
 name = "distance-estimation"
 version = "0.1.0"
-description = "② Son → distance au drone : interface commune et estimateur simulé (trajectoire scriptée)"
+description = "② Son → distance au drone : interface commune et estimateur simulé (trajectoire scriptée), modèle de release"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["features", "numpy>=2.0"]
+
+[tool.uv.sources]
+features = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.9,<0.14"]

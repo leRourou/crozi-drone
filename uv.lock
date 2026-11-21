@@ -255,6 +255,17 @@ wheels = [
 name = "distance-estimation"
 version = "0.1.0"
 source = { editable = "packages/distance-estimation" }
+dependencies = [
+    { name = "features" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "features", editable = "packages/features" },
+    { name = "numpy", specifier = ">=2.0" },
+]
 
 [[package]]
 name = "fastapi"
