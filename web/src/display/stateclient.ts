@@ -39,6 +39,13 @@ export class StateClient {
     this.socket = null;
   }
 
+  /** Relance tout de suite une reconnexion en attente ; sans effet sinon. Le délai croissant continue. */
+  retryNow(): void {
+    if (this.timer === null) return;
+    this.deps.clearTimer(this.timer);
+    this.open();
+  }
+
   private open(): void {
     this.timer = null;
     this.connected = false;
