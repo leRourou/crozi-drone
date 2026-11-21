@@ -12,6 +12,7 @@ import type {
   StopReason,
 } from "@edth/capture";
 import { WEBKIT_CAPTURE_CONTRACT } from "@edth/capture";
+import { reconnectDelayMs } from "../shared/net";
 import { Packetizer } from "./packetizer";
 import type { ProfileId } from "../shared/profiles";
 
@@ -22,8 +23,6 @@ const PING_PERIOD_MS = 2000;
 const MAX_BUFFERED_BYTES = 5 * 48_000 * 2;
 /** Fermeture 1008 : le serveur a refusé la session ; réessayer reproduirait le refus. */
 const CLOSE_POLICY_VIOLATION = 1008;
-const RECONNECT_BASE_MS = 1000;
-const RECONNECT_MAX_MS = 30_000;
 
 export type LogLevel = "info" | "warn" | "error";
 export type State = "idle" | "starting" | "streaming" | "reconnecting" | "error";
@@ -284,11 +283,6 @@ class Session {
     this.socket.close();
     this.onFinished(outcome, this.ready);
   }
-}
-
-/** Délai avant une reconnexion, après `failures` échecs sans ready : 1, 2, 4… plafonné à 30 s. */
-export function reconnectDelayMs(failures: number): number {
-  return Math.min(RECONNECT_BASE_MS * 2 ** failures, RECONNECT_MAX_MS);
 }
 
 /**

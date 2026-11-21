@@ -2,14 +2,10 @@ import { createPcmCapture, getCaptureSupport, WEBKIT_CAPTURE_CONTRACT } from "@e
 import { type FormEvent, type RefObject, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { appendLog, clock, type LogLine } from "./logbuffer";
 import { isLittleEndian } from "./packetizer";
+import { socketUrl } from "../shared/net";
 import { findProfile, PROFILES, type Profile } from "../shared/profiles";
 import { type LogLevel, type Status, Streamer, subtleSha256Hex } from "./streamer";
 import { ScreenWakeLock } from "./wakelock";
-
-function socketUrl(): string {
-  const scheme = location.protocol === "https:" ? "wss" : "ws";
-  return `${scheme}://${location.host}/ws/audio`;
-}
 
 function expectedContract(): { text: string; webkit: boolean } {
   try {
@@ -158,7 +154,7 @@ export function App() {
         {
           createCapture: createPcmCapture,
           openSocket: (url) => new WebSocket(url),
-          url: socketUrl(),
+          url: socketUrl("/ws/audio"),
           uuid: () => crypto.randomUUID(),
           now: () => performance.now(),
           userAgent: navigator.userAgent,
