@@ -24,6 +24,12 @@ describe("parseState", () => {
     expect(parseState(raw(message({ phones: [offline, noDrone] })))?.phones).toEqual([offline, noDrone]);
   });
 
+  it("accepts each estimator the server can run, including the release model", () => {
+    for (const estimator of ["none", "scripted", "model"] as const) {
+      expect(parseState(raw(message({ estimator })))?.estimator).toBe(estimator);
+    }
+  });
+
   it("parses the drone view: located with a zone, or another status without", () => {
     expect(parseState(raw(message({ drone: droneView() }))) ?.drone).toEqual(droneView());
     const waiting = droneView({ status: "insufficient", detecting: 2, zone: null, truth: null });
@@ -40,7 +46,7 @@ describe("parseState", () => {
   it.each([
     ["not JSON", "{"],
     ["another message type", raw(message({ type: "stats" }))],
-    ["an unknown estimator", raw(message({ estimator: "model" }))],
+    ["an unknown estimator", raw(message({ estimator: "neural" }))],
     ["phones not a list", raw(message({ phones: {} }))],
     ["an unknown status", raw(message({ phones: [phone({ status: "busy" })] }))],
     ["a non-numeric position", raw(message({ phones: [phone({ position_m: { x: "1", y: 0, z: 0 } })] }))],

@@ -4,7 +4,7 @@
  */
 
 export type PhoneStatus = "streaming" | "stale" | "offline" | "never_seen";
-export type EstimatorName = "none" | "scripted";
+export type EstimatorName = "none" | "scripted" | "model";
 
 interface Freshness {
   readonly age_s: number;
@@ -88,7 +88,7 @@ export interface StateMessage {
 type Obj = Record<string, unknown>;
 
 const STATUSES: readonly unknown[] = ["streaming", "stale", "offline", "never_seen"];
-const ESTIMATORS: readonly unknown[] = ["none", "scripted"];
+const ESTIMATORS: readonly unknown[] = ["none", "scripted", "model"];
 const DRONE_STATUSES: readonly unknown[] = ["located", "insufficient", "no_detection", "inconsistent"];
 const ZONE_NUMBERS = ["x_m", "y_m", "radius_m", "z_m", "z_min_m", "z_max_m", "tolerance"] as const;
 const TRACK_NUMBERS = ["x_m", "y_m", "z_m", "vx_mps", "vy_mps", "radius_m", "z_min_m", "z_max_m"] as const;
