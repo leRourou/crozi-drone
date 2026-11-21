@@ -59,7 +59,7 @@ web/src/capture/          ① page téléphone : packetizer.ts, streamer.ts (ses
 web/src/display/          ④ plan de salle (display.html ; /display redirige, en dev Vite taper /display.html) :
                              state.ts (message validé à l'arrivée), stateclient.ts (abonnement, reconnexion),
                              room.ts (plan de la salle en mètres), mapgeom.ts (cercles, écoute), format.ts,
-                             MapView.tsx / Panel.tsx / icons.tsx / App.tsx (UI)
+                             MapView.tsx / Panel.tsx / icons.tsx / App.tsx (UI, design system Vigie C2 : styles.css)
 web/src/shared/           edth-capture.d.ts (types du module partagé), profiles.ts (contrat, alias `@contracts`),
                              net.ts (URL ws/wss, délai de reconnexion), theme.css (palette)
 packages/localization/    ③ distances → position : calculation.py `localiser_drone` (capteurs 3D, `tol`

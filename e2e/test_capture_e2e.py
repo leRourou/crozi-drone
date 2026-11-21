@@ -133,7 +133,7 @@ def test_the_room_map_shows_the_listening_phone_and_its_simulated_distance(stack
         display.goto(stack["url"] + "display.html")
         noe_item = display.locator('.phone-item[data-profile="noe"]')
         noe_item.and_(display.locator('[data-status="never_seen"]')).wait_for(timeout=10_000)
-        display.get_by_text("Estimateur simulé").wait_for()
+        display.locator(".badge.sim").wait_for()
 
         phone = browser.new_page()
         start_capture(phone, stack["url"], "Téléphone de Noé")
@@ -141,7 +141,7 @@ def test_the_room_map_shows_the_listening_phone_and_its_simulated_distance(stack
         display.locator('.phone-marker[data-profile="noe"][data-listening="on"]').wait_for(timeout=15_000)
         noe_item.and_(display.locator('[data-status="streaming"]')).wait_for()
         detection = noe_item.locator(".detection")
-        detection.filter(has_text=re.compile("Drone à|Aucun drone")).wait_for(timeout=5_000)
+        detection.filter(has_text=re.compile(r"\d m ±|Aucun drone")).wait_for(timeout=5_000)
         listening = display.locator(".phone-marker").evaluate_all(
             "els => els.map(e => e.dataset.listening)"
         )
