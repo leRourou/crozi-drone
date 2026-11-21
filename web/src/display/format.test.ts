@@ -1,23 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { droneView, phone } from "./fakes";
+import { droneView } from "./fakes";
 import {
   ageText,
   altitudeText,
   detectionText,
   droneStatusText,
   levelText,
-  listeningText,
   metres,
-  rangeText,
-  shortName,
-  shortStatus,
   statusLabel,
-  trackBadge,
   truthErrorText,
-  utcClock,
   zoneText,
 } from "./format";
-import type { DroneView, PhoneState } from "./state";
+import type { DroneView } from "./state";
 
 describe("statusLabel", () => {
   it("names every phone status in French", () => {
@@ -116,66 +110,5 @@ describe("truthErrorText", () => {
   it("is absent without simulation or without position", () => {
     expect(truthErrorText(drone({ truth: null }))).toBeNull();
     expect(truthErrorText(drone({ status: "insufficient", zone: null }))).toBeNull();
-  });
-});
-
-describe("shortStatus", () => {
-  it("names every phone status in one short word for the sensor table", () => {
-    expect(["streaming", "stale", "offline", "never_seen"].map((s) => shortStatus(s as never))).toEqual([
-      "Écoute",
-      "Lent",
-      "Hors ligne",
-      "Jamais",
-    ]);
-  });
-});
-
-describe("rangeText", () => {
-  it("gives the distance and its margin, or why there is none", () => {
-    expect(rangeText(null, "none")).toBe("—");
-    expect(rangeText(null, "scripted")).toBe("En attente");
-    expect(rangeText({ drone: false, distance_m: null, uncertainty_rel: null, age_s: 0, fresh: true }, "scripted")).toBe(
-      "Aucun drone",
-    );
-    expect(rangeText({ drone: true, distance_m: 5.06, uncertainty_rel: 0.1, age_s: 0, fresh: true }, "scripted")).toBe(
-      "5,1 m ± 10 %",
-    );
-  });
-});
-
-describe("utcClock", () => {
-  it("shows the server time as a 24 h UTC clock", () => {
-    expect(utcClock(Date.UTC(2026, 10, 21, 14, 32, 7, 800) / 1000)).toBe("14:32:07Z");
-  });
-});
-
-describe("shortName", () => {
-  it("keeps the first name of the phone label for the map", () => {
-    expect(shortName("Téléphone de Noé")).toBe("Noé");
-    expect(shortName("Tablette")).toBe("Tablette");
-  });
-});
-
-describe("listeningText", () => {
-  it("counts the phones that are listening right now", () => {
-    const phones = [phone(), phone({ status: "stale" }), phone({ status: "offline" })] as PhoneState[];
-    expect(listeningText(phones)).toBe("1/3 à l'écoute");
-  });
-});
-
-describe("trackBadge", () => {
-  const drone = (status: string) => droneView({ status, zone: status === "located" ? droneView().zone : null }) as DroneView;
-  it.each([
-    ["located", "Localisée", "hostile"],
-    ["insufficient", "Non localisée", "warn"],
-    ["inconsistent", "Incohérente", "warn"],
-    ["no_detection", "Aucune détection", "off"],
-  ])("%s → %s (%s)", (status, text, tone) => {
-    expect(trackBadge(drone(status), "scripted")).toEqual({ text, tone });
-  });
-
-  it("says why there is no result yet", () => {
-    expect(trackBadge(null, "none")).toEqual({ text: "Pas d'estimateur", tone: "off" });
-    expect(trackBadge(null, "scripted")).toEqual({ text: "En attente", tone: "off" });
   });
 });

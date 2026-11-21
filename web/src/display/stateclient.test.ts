@@ -124,34 +124,6 @@ describe("StateClient", () => {
     expect(connections.map(([c]) => c)).toEqual(["connecting", "connected", "invalid", "connected"]);
   });
 
-  it("retryNow cancels the pending wait and reconnects at once", () => {
-    client.start();
-    sockets[0].drop();
-    client.retryNow();
-    expect(timers[0].cleared).toBe(true);
-    expect(sockets).toHaveLength(2);
-    expect(connections.at(-1)).toEqual(["connecting", undefined]);
-  });
-
-  it("retryNow keeps the growing delay if the server is still down", () => {
-    client.start();
-    sockets[0].drop();
-    client.retryNow();
-    sockets[1].drop();
-    expect(timers.map((t) => t.ms)).toEqual([1000, 2000]);
-  });
-
-  it("retryNow does nothing while connected or after stop", () => {
-    client.start();
-    sockets[0].receive(valid());
-    client.retryNow();
-    expect(sockets).toHaveLength(1);
-    sockets[0].drop();
-    client.stop();
-    client.retryNow();
-    expect(sockets).toHaveLength(1);
-  });
-
   it("stop is harmless before start and when called twice", () => {
     client.stop();
     client.start();

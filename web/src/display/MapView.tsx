@@ -1,6 +1,6 @@
 import type { KeyboardEvent, ReactNode } from "react";
-import { metres, shortName } from "./format";
-import { PX, Reticle, SensorIcon, TrackIcon, TruthIcon } from "./icons";
+import { metres } from "./format";
+import { DroneIcon, PhoneIcon, PX } from "./icons";
 import { annulusPath, hearsDrone, listening, rangeRings } from "./mapgeom";
 import { outlinePath, ROOM } from "./room";
 import type { StateMessage } from "./state";
@@ -13,13 +13,15 @@ interface Props {
   onSelect: (selection: Selection) => void;
 }
 
-const MARGIN = { left: 1.1, top: 0.8, right: 0.6, bottom: 1.4 };
+const MARGIN = { left: 2, top: 1.6, right: 2.2, bottom: 2 };
 const VIEWBOX = [
   -MARGIN.left,
   -MARGIN.top,
   ROOM.width_m + MARGIN.left + MARGIN.right,
   ROOM.height_m + MARGIN.top + MARGIN.bottom,
 ].join(" ");
+/** Cote du plan : deux décimales, virgule (comme le relevé de la salle). */
+const cote = (v: number) => v.toFixed(2).replace(".", ",");
 
 function Clickable(props: { label: string; selected: boolean; onSelect: () => void; className: string; x: number; y: number; data?: Record<string, string>; children: ReactNode }) {
   const onKey = (e: KeyboardEvent) => {
@@ -31,7 +33,7 @@ function Clickable(props: { label: string; selected: boolean; onSelect: () => vo
   return (
     <g
       className={`${props.className} ${props.selected ? "selected" : ""}`}
-      transform={`translate(${props.x} ${props.y}) scale(${PX})`}
+      transform={`translate(${props.x} ${props.y})`}
       role="button"
       tabIndex={0}
       aria-label={props.label}
@@ -61,25 +63,31 @@ function Room() {
   );
 }
 
-/** Carroyage (abscisses tous les 2 m, ordonnées tous les 5 m) et échelle. */
-function GridLabels() {
-  const xs = [0, 2, 4, 6, 8, 10];
-  const ys = [0, 5, 10, 15, 20];
-  const h = ROOM.height_m;
+function Dimensions() {
+  const { width_m: w, height_m: h } = ROOM;
   return (
-    <g aria-hidden="true">
-      <g className="gridlabels">
-        {xs.map((x) => (
-          <text key={x} x={x} y={-0.25} textAnchor="middle">{x === 10 ? "10 m" : x}</text>
-        ))}
-        {ys.map((y) => (
-          <text key={y} x={-0.25} y={y + 0.09} textAnchor="end">{y === 20 ? "20 m" : y}</text>
-        ))}
+    <g className="dimensions">
+      <path d={`M0,-0.55H${w}M0,-0.7V-0.4M${w},-0.7V-0.4`} />
+      <text x={w / 2} y={-0.8} textAnchor="middle">{metres(w)}</text>
+      <path d={`M${w + 0.6},0V${h}M${w + 0.45},0H${w + 0.75}M${w + 0.45},${h}H${w + 0.75}`} />
+      <text x={w + 1.1} y={h / 2} textAnchor="middle" transform={`rotate(90 ${w + 1.1} ${h / 2})`}>{metres(h)}</text>
+      {ROOM.westWall.map(([from, to]) => (
+        <text key={from} x={-0.3} y={(from + to) / 2} textAnchor="end" className="small">{cote(to - from)}</text>
+      ))}
+      {ROOM.pillars.map((p) => (
+        <g key={p.y} className="small">
+          <text x={-0.3} y={p.y + p.h / 2 + 0.1} textAnchor="end">{cote(p.h)}</text>
+          <text x={p.w / 2} y={p.y - 0.12} textAnchor="middle">{cote(p.w)}</text>
+        </g>
+      ))}
+      <g className="north" transform={`translate(${w + 1.4} 0.6)`}>
+        <path d="M0,-0.35L0.2,0.35L0,0.2L-0.2,0.35Z" />
+        <text y={-0.5} textAnchor="middle">N</text>
       </g>
-      <g className="scale" transform={`translate(0 ${h + 0.8})`}>
-        <path d="M0,-0.15V0.15M0,0H5M5,-0.15V0.15M2.5,-0.08V0.08" />
-        <text x={0} y={0.5} textAnchor="middle">0</text>
-        <text x={5} y={0.5} textAnchor="middle">5 m</text>
+      <g className="scale" transform={`translate(0 ${h + 1})`}>
+        <path d="M0,0H5M0,-0.15V0.15M5,-0.15V0.15" />
+        <text x={0} y={-0.25}>0</text>
+        <text x={5.15} y={0.12}>5 m</text>
       </g>
     </g>
   );
@@ -90,7 +98,7 @@ export function MapView({ state, selected, onSelect }: Props) {
   const rings = rangeRings(state.phones);
   const droneSelected = selected?.kind === "drone";
   return (
-    <svg className="map" viewBox={VIEWBOX} role="img" aria-label="Plan de salle : capteurs et drone">
+    <svg className="map" viewBox={VIEWBOX} role="img" aria-label="Plan de salle : téléphones et drone">
       <defs>
         <clipPath id="room-clip">
           <path d={outlinePath} />
@@ -101,8 +109,8 @@ export function MapView({ state, selected, onSelect }: Props) {
         </pattern>
       </defs>
       <Room />
-      <GridLabels />
-      <g className="rings" clipPath="url(#room-clip)">
+      <Dimensions />
+      <g className="rings">
         {rings.map((ring) => (
           <g key={ring.profile} className={`ring ${ring.fresh ? "" : "old"}`} data-ring={ring.profile}>
             <path d={annulusPath(ring.cx, ring.cy, ring.inner, ring.outer)} className="margin" fillRule="evenodd" />
@@ -110,20 +118,19 @@ export function MapView({ state, selected, onSelect }: Props) {
           </g>
         ))}
       </g>
-      {drone?.zone && <circle cx={drone.zone.x_m} cy={drone.zone.y_m} r={drone.zone.radius_m} className="zone" />}
+      {drone?.zone && (
+        <circle cx={drone.zone.x_m} cy={drone.zone.y_m} r={drone.zone.radius_m} className="zone" />
+      )}
       {drone?.truth && (
-        <Clickable label="Drone simulé (position vraie)" selected={droneSelected && !drone.zone} onSelect={() => onSelect({ kind: "drone" })} className="drone-marker ghost" x={drone.truth.x_m} y={drone.truth.y_m}>
-          <circle r={8} className="hit" />
-          <TruthIcon />
-          {!drone.zone && <Reticle w={12} h={12} />}
+        <Clickable label="Drone simulé (position vraie)" selected={droneSelected} onSelect={() => onSelect({ kind: "drone" })} className="drone-marker ghost" x={drone.truth.x_m} y={drone.truth.y_m}>
+          <g transform={`scale(${PX})`}><DroneIcon /></g>
         </Clickable>
       )}
-      {/* Piste avant les capteurs : un capteur survolé reste visible et cliquable. */}
+      {/* Drone avant les téléphones : un téléphone survolé reste visible et cliquable. */}
       {drone?.zone && (
         <Clickable label="Drone (position calculée)" selected={droneSelected} onSelect={() => onSelect({ kind: "drone" })} className="drone-marker" x={drone.zone.x_m} y={drone.zone.y_m} data={{ "data-drone": "located" }}>
-          <TrackIcon />
-          <Reticle w={18} h={16} />
-          <text className="track-label" y={-22}>{`T-01 · ± ${metres(drone.zone.radius_m)} · z ${metres(drone.zone.z_m)}`}</text>
+          <circle r={0.75} className="selection" />
+          <g transform={`scale(${PX})`}><DroneIcon /></g>
         </Clickable>
       )}
       {state.phones.map((phone) => {
@@ -141,42 +148,13 @@ export function MapView({ state, selected, onSelect }: Props) {
             y={phone.position_m.y}
             data={{ "data-profile": phone.profile, "data-listening": state_, "data-detecting": String(detecting) }}
           >
-            <rect x={-16} y={-12} width={84} height={24} className="hit" />
-            <SensorIcon />
-            <circle cx={10} cy={-7} r={3} className="pip" />
-            <Reticle w={16} h={12} />
-            <text className="name" x={20} y={4}>{shortName(phone.label)}</text>
+            {state_ === "on" && <circle r={0.48} className="pulse" />}
+            <circle r={0.62} className="selection" />
+            <g transform={`scale(${PX})`}><PhoneIcon /></g>
+            <circle cx={0.42} cy={-0.42} r={0.14} className="listening-dot" />
           </Clickable>
         );
       })}
     </svg>
-  );
-}
-
-/** Légende flottante, en bas à gauche du plan. */
-export function MapLegend({ simulated }: { simulated: boolean }) {
-  const icon = (children: ReactNode) => (
-    <svg width="28" height="18" viewBox="-14 -9 28 18" aria-hidden="true">{children}</svg>
-  );
-  return (
-    <section className="legend" aria-label="Légende">
-      <header className="panel-head"><h2 className="label">Légende</h2></header>
-      <ul>
-        <li>{icon(<SensorIcon />)} Capteur (téléphone), pastille = écoute</li>
-        <li>{icon(<g className="detecting"><SensorIcon /></g>)} Capteur qui entend le drone</li>
-        <li>
-          {icon(
-            <g className="ring">
-              <path d={annulusPath(0, 0, 8, 13)} className="margin" fillRule="evenodd" />
-              <circle r={10.5} className="distance" style={{ strokeWidth: 1, strokeDasharray: "3 2" }} />
-            </g>,
-          )}{" "}
-          Distance mesurée ± marge
-        </li>
-        <li>{icon(<TrackIcon />)} Piste drone (calculée)</li>
-        <li>{icon(<circle r={8} className="zone" style={{ strokeWidth: 1, strokeDasharray: "3 2" }} />)} Zone estimée</li>
-        {simulated && <li>{icon(<TruthIcon />)} Position vraie du drone simulé</li>}
-      </ul>
-    </section>
   );
 }
