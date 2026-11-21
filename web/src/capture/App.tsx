@@ -22,10 +22,17 @@ const WEBKIT_WARNING =
   "Profil WebKit (iPhone) : seul l'anti-écho est vérifié. Réduction de bruit et gain automatique " +
   "ne sont pas exposés par Safari ; données non équivalentes au profil strict.";
 
+const STATE_LABEL: Record<Status["state"], string> = {
+  idle: "Prêt",
+  starting: "Connexion…",
+  streaming: "Enregistrement",
+  error: "Erreur",
+};
+
 export function App() {
   const [status, setStatus] = useState<Status>({ state: "idle" });
   const [lines, setLines] = useState<LogLine[]>([]);
-  const levelRef = useRef<HTMLDivElement>(null);
+  const levelRef = useRef<HTMLButtonElement>(null);
   const nextId = useRef(0);
   const expected = useMemo(expectedContract, []);
 
@@ -61,42 +68,47 @@ export function App() {
 
   const running = status.state === "starting" || status.state === "streaming";
   const webkit = status.webkit ?? expected.webkit;
+  const lastError = status.state === "error" ? lines.findLast((l) => l.level === "error") : undefined;
 
   return (
     <main>
       <header>
-        <h1>Crozidrone · captation</h1>
-        <span className={`badge ${status.state}`}>{status.state}</span>
+        <h1>Crozidrone</h1>
+        <span className={`badge ${status.state}`}>{STATE_LABEL[status.state]}</span>
       </header>
 
-      <button
-        type="button"
-        className={running ? "stop" : "start"}
-        onClick={() => (running ? streamer.stop() : streamer.start())}
-      >
-        {running ? "Arrêter" : "Démarrer"}
-      </button>
+      <section className="recorder">
+        <button
+          type="button"
+          ref={levelRef}
+          className={`record ${running ? "on" : ""}`}
+          aria-label={running ? "Arrêter" : "Démarrer"}
+          onClick={() => (running ? streamer.stop() : streamer.start())}
+        >
+          <span className="icon" />
+        </button>
+        <p className="hint">{running ? "Appuyer pour arrêter" : "Appuyer pour enregistrer"}</p>
+        {lastError && <p className="error">{lastError.text}</p>}
+        {webkit && <p className="warning">{WEBKIT_WARNING}</p>}
+      </section>
 
-      <dl className="status">
-        <dt>Contrat</dt>
-        <dd>{status.contract ?? `${expected.text} (prévu)`}</dd>
-        <dt>Session</dt>
-        <dd>{status.sessionId?.slice(0, 8) ?? "—"}</dd>
-      </dl>
-      {webkit && <p className="warning">{WEBKIT_WARNING}</p>}
-
-      <div className="meter" ref={levelRef} aria-label="niveau micro">
-        <div className="bar" />
-      </div>
-
-      {/* column-reverse + liste inversée : la plus récente en bas, défilement ancré en bas */}
-      <ol className="logs" aria-live="polite">
-        {[...lines].reverse().map((line) => (
-          <li key={line.id} className={line.level}>
-            <time>{line.time}</time> {line.text}
-          </li>
-        ))}
-      </ol>
+      <details>
+        <summary>Détails</summary>
+        <dl className="status">
+          <dt>Contrat</dt>
+          <dd>{status.contract ?? `${expected.text} (prévu)`}</dd>
+          <dt>Session</dt>
+          <dd>{status.sessionId?.slice(0, 8) ?? "—"}</dd>
+        </dl>
+        {/* column-reverse + liste inversée : la plus récente en bas, défilement ancré en bas */}
+        <ol className="logs" aria-live="polite">
+          {[...lines].reverse().map((line) => (
+            <li key={line.id} className={line.level}>
+              <time>{line.time}</time> {line.text}
+            </li>
+          ))}
+        </ol>
+      </details>
     </main>
   );
 }

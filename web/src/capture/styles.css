@@ -39,7 +39,9 @@ header {
 
 h1 {
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .badge {
@@ -59,20 +61,77 @@ h1 {
   color: var(--err);
 }
 
-button {
-  min-height: 64px;
+.recorder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  text-align: center;
+}
+
+.record {
+  --level: 0;
+  display: grid;
+  place-items: center;
+  width: 144px;
+  height: 144px;
+  padding: 0;
   border: 0;
-  border-radius: 12px;
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: white;
+  border-radius: 50%;
+  background: var(--panel);
+  /* Halo = niveau micro (diagnostic seulement). */
+  box-shadow:
+    0 0 0 2px rgb(255 255 255 / 0.08),
+    0 0 0 calc(var(--level) * 28px) rgb(248 81 73 / 0.25);
+  cursor: pointer;
   touch-action: manipulation;
+  transition: box-shadow 60ms linear, transform 120ms ease;
 }
-button.start {
-  background: var(--accent);
+.record:active {
+  transform: scale(0.96);
 }
-button.stop {
+.record:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.record .icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
   background: var(--err);
+  transition: border-radius 150ms ease, width 150ms ease, height 150ms ease;
+}
+.record.on .icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+}
+
+.error {
+  margin: 0;
+  color: var(--err);
+  font-size: 0.9rem;
+}
+
+details {
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 8px 12px;
+}
+summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+details[open] summary {
+  margin-bottom: 8px;
 }
 
 .status {
@@ -93,36 +152,23 @@ button.stop {
 
 .warning {
   margin: 0;
+  max-width: 360px;
   padding: 8px 12px;
   border-left: 3px solid var(--warn);
   background: var(--panel);
   font-size: 0.85rem;
-}
-
-.meter {
-  --level: 0;
-  height: 14px;
-  border-radius: 7px;
-  background: var(--panel);
-  overflow: hidden;
-}
-.meter .bar {
-  height: 100%;
-  width: calc(var(--level) * 100%);
-  background: linear-gradient(90deg, var(--ok), var(--warn) 75%, var(--err));
-  transition: width 60ms linear;
+  text-align: left;
 }
 
 .logs {
   flex: 1;
-  min-height: 240px;
-  max-height: 55dvh;
-  margin: 0;
+  max-height: 40dvh;
+  margin: 8px 0 0;
   padding: 8px;
   list-style: none;
   overflow-y: auto;
-  border-radius: 8px;
-  background: var(--panel);
+  border-radius: 6px;
+  background: var(--bg);
   font: 0.72rem/1.4 ui-monospace, monospace;
   display: flex;
   flex-direction: column-reverse;

@@ -115,6 +115,7 @@ def test_fake_microphone_reaches_the_server_bit_exact(stack, tmp_path):
         )
         page = browser.new_page()
         page.goto(stack["url"])
+        page.get_by_text("Détails").click()  # journal replié par défaut
         page.get_by_role("button", name="Démarrer").click()
         page.get_by_text("ready session=").wait_for(timeout=15_000)
         page.wait_for_timeout(CAPTURE_SECONDS * 1000)
