@@ -109,43 +109,168 @@ h1 {
   border-radius: 8px;
 }
 
-.record:disabled {
-  opacity: 0.4;
+/* Parcours en 2 étapes : ① choix du téléphone, ② enregistrement. */
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.progress ol {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.progress li {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.1);
+  transition: background 200ms ease;
+}
+.progress li.done {
+  background: var(--accent);
+}
+
+.step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: step-in 200ms ease-out;
+}
+@keyframes step-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .step {
+    animation: none;
+  }
+}
+.step h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 650;
+  line-height: 1.2;
+  outline: none;
+}
+.lead {
+  margin: -8px 0 0;
+  color: var(--muted);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.field select {
+  appearance: none;
+  width: 100%;
+  min-height: 56px;
+  padding: 0 48px 0 16px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 14px;
+  /* Chevron dessiné en CSS : le select reste natif (roue iOS / liste Android). */
+  background:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%) right 22px center / 6px 6px no-repeat,
+    linear-gradient(-45deg, transparent 50%, var(--muted) 50%) right 16px center / 6px 6px no-repeat,
+    var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 1rem; /* ≥ 16 px : pas de zoom automatique sur iOS */
+  cursor: pointer;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.field select:invalid {
+  color: var(--muted); /* option vide « Choisir un profil… » */
+}
+.field select:hover {
+  border-color: rgb(255 255 255 / 0.24);
+}
+.field select:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 4px rgb(47 129 247 / 0.3);
+}
+.field option {
+  color: var(--text);
+  background: var(--panel);
+}
+
+.primary {
+  min-height: 56px;
+  margin-top: auto; /* bouton en bas, sous le pouce */
+  border: 0;
+  border-radius: 14px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: opacity 150ms ease, transform 120ms ease;
+}
+.primary:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.primary:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+}
+.primary:disabled {
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
-.profiles {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+.recorder h2 {
+  position: absolute; /* titre pour lecteurs d'écran ; la puce profil fait office de titre visuel */
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
   margin: 0;
-  padding: 0;
-  border: 0;
-}
-.profiles legend {
-  width: 100%;
-  margin-bottom: 4px;
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-.profiles label {
-  padding: 8px 12px;
+  padding: 6px 6px 6px 14px;
   border-radius: 999px;
   background: var(--panel);
+  font-weight: 500;
+}
+.chip .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.link {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.08);
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.85rem;
   cursor: pointer;
-  touch-action: manipulation;
 }
-.profiles label:has(input:checked) {
+.link:focus-visible {
   outline: 2px solid var(--accent);
-}
-.profiles input {
-  accent-color: var(--accent);
-  margin: 0 6px 0 0;
-}
-.profiles:disabled label {
-  opacity: 0.5;
-  cursor: not-allowed;
+  outline-offset: 2px;
 }
 
 .hint {

@@ -116,10 +116,15 @@ def test_fake_microphone_reaches_the_server_bit_exact(stack, tmp_path):
         page = browser.new_page()
         page.goto(stack["url"])
         page.get_by_text("Détails").click()  # journal replié par défaut
-        start = page.get_by_role("button", name="Démarrer")
-        assert start.is_disabled()  # profil obligatoire
-        page.get_by_label("Téléphone de Noé").check()
-        start.click()
+        # Étape 1 : pas de bouton d'enregistrement tant que le profil n'est pas confirmé.
+        proceed = page.get_by_role("button", name="Continuer")
+        assert proceed.is_disabled()
+        assert page.get_by_role("button", name="Démarrer").count() == 0
+        page.get_by_label("Téléphone", exact=True).select_option(label="Téléphone de Noé")
+        proceed.click()
+        # Étape 2
+        page.get_by_text("Étape 2 sur 2").wait_for()
+        page.get_by_role("button", name="Démarrer").click()
         page.get_by_text("ready session=").wait_for(timeout=15_000)
         page.wait_for_timeout(CAPTURE_SECONDS * 1000)
         page.get_by_role("button", name="Arrêter").click()

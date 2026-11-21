@@ -11,3 +11,10 @@ export const PROFILES = [
 ] as const;
 
 export type ProfileId = (typeof PROFILES)[number]["id"];
+
+export type Profile = (typeof PROFILES)[number];
+
+/** Valeur brute d'un <select> → profil, ou undefined (option vide, valeur inconnue). */
+export function findProfile(value: string): Profile | undefined {
+  return PROFILES.find((p) => p.id === value);
+}
