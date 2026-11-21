@@ -12,6 +12,14 @@ def test_defaults_without_environment():
         state_period_ms=250,
         stale_after_ms=1000,
         detection_fresh_ms=2000,
+        fusion_spread_ms=500,
+        scripted_offset_east_m=0.5,
+        scripted_offset_north_m=3.0,
+        scripted_radius_m=3.0,
+        scripted_altitude_m=1.5,
+        scripted_period_s=20.0,
+        scripted_range_m=5.0,
+        scripted_uncertainty=0.10,
     )
 
 
@@ -24,6 +32,24 @@ def test_every_value_comes_from_its_variable():
         "DETECTION_FRESH_MS": "3000",
     }
     assert load_settings(env) == Settings("scripted", 500, 100, 1500, 3000)
+
+
+def test_the_scripted_drone_and_fusion_values_come_from_their_variables():
+    env = {
+        "FUSION_SPREAD_MS": "300",
+        "SCRIPTED_OFFSET_EAST_M": "-1.25",
+        "SCRIPTED_OFFSET_NORTH_M": "0",
+        "SCRIPTED_RADIUS_M": "2",
+        "SCRIPTED_ALTITUDE_M": "0",
+        "SCRIPTED_PERIOD_S": "40",
+        "SCRIPTED_RANGE_M": "8.5",
+        "SCRIPTED_UNCERTAINTY": "0.2",
+    }
+    s = load_settings(env)
+    assert s.fusion_spread_s == 0.3
+    assert (s.scripted_offset_east_m, s.scripted_offset_north_m) == (-1.25, 0.0)
+    assert (s.scripted_radius_m, s.scripted_altitude_m, s.scripted_period_s) == (2.0, 0.0, 40.0)
+    assert (s.scripted_range_m, s.scripted_uncertainty) == (8.5, 0.2)
 
 
 def test_seconds_are_derived_from_milliseconds():
@@ -44,6 +70,14 @@ def test_window_frames_at_48_khz():
         ({"STALE_AFTER_MS": "1.5"}, "STALE_AFTER_MS"),
         ({"DETECTION_FRESH_MS": "abc"}, "DETECTION_FRESH_MS"),
         ({"DETECTION_FRESH_MS": ""}, "DETECTION_FRESH_MS"),
+        ({"FUSION_SPREAD_MS": "0"}, "FUSION_SPREAD_MS"),
+        ({"SCRIPTED_OFFSET_EAST_M": "est"}, "SCRIPTED_OFFSET_EAST_M"),
+        ({"SCRIPTED_OFFSET_NORTH_M": "nan"}, "SCRIPTED_OFFSET_NORTH_M"),
+        ({"SCRIPTED_RADIUS_M": "0"}, "SCRIPTED_RADIUS_M"),
+        ({"SCRIPTED_ALTITUDE_M": "-0.5"}, "SCRIPTED_ALTITUDE_M"),
+        ({"SCRIPTED_PERIOD_S": "inf"}, "SCRIPTED_PERIOD_S"),
+        ({"SCRIPTED_RANGE_M": "-3"}, "SCRIPTED_RANGE_M"),
+        ({"SCRIPTED_UNCERTAINTY": "0"}, "SCRIPTED_UNCERTAINTY"),
     ],
 )
 def test_an_invalid_value_refuses_to_start_and_names_the_variable(env, variable):

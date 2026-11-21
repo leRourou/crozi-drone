@@ -33,7 +33,7 @@ from audio_capture.recording import WavRecorder
 from audio_capture.session import EndAck, StreamSession
 from audio_capture.stats import StatsSnapshot
 from distance_estimation.estimator import DistanceEstimator
-from distance_estimation.scripted import ScriptedEstimator
+from distance_estimation.scripted import ScriptedEstimator, circle_near
 from distance_estimation.windows import WindowAccumulator
 
 STATS_PERIOD_S = 1.0
@@ -64,7 +64,18 @@ def make_estimation(settings: Settings, profiles: tuple[Profile, ...]) -> Estima
     if settings.estimator == "none":
         return None
     positions = {p.id: (p.x_m, p.y_m, p.z_m) for p in profiles}
-    return Estimation(ScriptedEstimator(positions), settings.window_frames)
+    trajectory = circle_near(
+        positions,
+        east_m=settings.scripted_offset_east_m,
+        north_m=settings.scripted_offset_north_m,
+        radius_m=settings.scripted_radius_m,
+        altitude_m=settings.scripted_altitude_m,
+        period_s=settings.scripted_period_s,
+    )
+    scripted = ScriptedEstimator(
+        positions, trajectory, settings.scripted_range_m, settings.scripted_uncertainty
+    )
+    return Estimation(scripted, settings.window_frames)
 
 
 def _recorder_for(hello: Hello) -> WavRecorder | None:
