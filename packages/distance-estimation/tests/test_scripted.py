@@ -1,6 +1,8 @@
 """Estimateur simulé : distance réelle entre un drone virtuel scripté et chaque téléphone."""
 
 import math
+import statistics
+from random import Random
 
 import pytest
 
@@ -66,3 +68,46 @@ def test_each_phone_gets_its_own_distance_to_the_same_drone():
 def test_the_true_drone_position_is_exposed_for_checking_the_chain():
     circle = CircleTrajectory(center=(1.0, 2.0, 1.5), radius_m=3.0, period_s=60.0)
     assert estimator({"noe": ORIGIN}, circle).drone_position(15.0) == pytest.approx((1.0, 5.0, 1.5))
+
+
+def test_noise_spreads_the_distance_around_the_truth_with_the_given_relative_deviation():
+    circle = CircleTrajectory(center=(0.0, 0.0, 0.0), radius_m=4.0, period_s=60.0)
+    noisy = ScriptedEstimator({"noe": ORIGIN}, circle, 30.0, 0.1, noise_rel=0.05, rng=Random(1))
+    distances = [noisy.estimate(window(t=0.0)).range.distance_m for _ in range(4000)]
+    assert statistics.fmean(distances) == pytest.approx(4.0, abs=0.02)
+    assert statistics.stdev(distances) == pytest.approx(0.2, rel=0.05)
+
+
+def test_without_noise_the_distance_is_exact():
+    circle = CircleTrajectory(center=(0.0, 0.0, 0.0), radius_m=4.0, period_s=60.0)
+    exact = ScriptedEstimator({"noe": ORIGIN}, circle, 30.0, 0.1, noise_rel=0.0, rng=Random(1))
+    assert {exact.estimate(window(t=0.0)).range.distance_m for _ in range(10)} == {4.0}
+
+
+def test_a_noisy_distance_is_never_negative():
+    circle = CircleTrajectory(center=(0.0, 0.0, 0.0), radius_m=1.0, period_s=60.0)
+    wild = ScriptedEstimator({"noe": ORIGIN}, circle, 30.0, 0.1, noise_rel=5.0, rng=Random(2))
+    assert min(wild.estimate(window(t=0.0)).range.distance_m for _ in range(500)) == 0.0
+
+
+def test_noise_does_not_change_whether_the_drone_is_heard():
+    circle = CircleTrajectory(center=(0.0, 0.0, 0.0), radius_m=6.0, period_s=60.0)
+    far = ScriptedEstimator({"noe": ORIGIN}, circle, 5.0, 0.1, noise_rel=0.5, rng=Random(3))
+    assert all(far.estimate(window(t=0.0)).range is None for _ in range(200))
+
+
+class FixedGauss:
+    """Générateur dont chaque tirage gaussien vaut `value` (écart-type ignoré)."""
+
+    def __init__(self, value):
+        self.value = value
+
+    def gauss(self, mu, sigma):
+        return self.value
+
+
+def test_a_noise_draw_scales_the_distance_by_one_plus_the_draw():
+    circle = CircleTrajectory(center=(0.0, 0.0, 0.0), radius_m=4.0, period_s=60.0)
+    for draw, expected in [(0.5, 6.0), (-0.25, 3.0)]:
+        noisy = ScriptedEstimator({"noe": ORIGIN}, circle, 30.0, 0.1, 0.05, FixedGauss(draw))
+        assert noisy.estimate(window(t=0.0)).range.distance_m == pytest.approx(expected)

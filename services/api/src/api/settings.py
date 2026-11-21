@@ -49,6 +49,7 @@ class Settings:
     scripted_period_s: float = _setting("SCRIPTED_PERIOD_S", _POSITIVE, 20.0)
     scripted_range_m: float = _setting("SCRIPTED_RANGE_M", _POSITIVE, 5.0)
     scripted_uncertainty: float = _setting("SCRIPTED_UNCERTAINTY", _POSITIVE, 0.10)
+    scripted_noise: float = _setting("SCRIPTED_NOISE", _NON_NEGATIVE, 0.0)  # écart-type relatif
 
     def __post_init__(self) -> None:
         if self.estimator not in ESTIMATORS:

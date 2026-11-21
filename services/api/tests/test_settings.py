@@ -20,6 +20,7 @@ def test_defaults_without_environment():
         scripted_period_s=20.0,
         scripted_range_m=5.0,
         scripted_uncertainty=0.10,
+        scripted_noise=0.0,
     )
 
 
@@ -44,12 +45,14 @@ def test_the_scripted_drone_and_fusion_values_come_from_their_variables():
         "SCRIPTED_PERIOD_S": "40",
         "SCRIPTED_RANGE_M": "8.5",
         "SCRIPTED_UNCERTAINTY": "0.2",
+        "SCRIPTED_NOISE": "0.05",
     }
     s = load_settings(env)
     assert s.fusion_spread_s == 0.3
     assert (s.scripted_offset_east_m, s.scripted_offset_north_m) == (-1.25, 0.0)
     assert (s.scripted_radius_m, s.scripted_altitude_m, s.scripted_period_s) == (2.0, 0.0, 40.0)
     assert (s.scripted_range_m, s.scripted_uncertainty) == (8.5, 0.2)
+    assert s.scripted_noise == 0.05
 
 
 def test_seconds_are_derived_from_milliseconds():
@@ -78,6 +81,7 @@ def test_window_frames_at_48_khz():
         ({"SCRIPTED_PERIOD_S": "inf"}, "SCRIPTED_PERIOD_S"),
         ({"SCRIPTED_RANGE_M": "-3"}, "SCRIPTED_RANGE_M"),
         ({"SCRIPTED_UNCERTAINTY": "0"}, "SCRIPTED_UNCERTAINTY"),
+        ({"SCRIPTED_NOISE": "-0.1"}, "SCRIPTED_NOISE"),
     ],
 )
 def test_an_invalid_value_refuses_to_start_and_names_the_variable(env, variable):

@@ -76,7 +76,11 @@ def make_estimation(settings: Settings, profiles: tuple[Profile, ...]) -> Estima
         period_s=settings.scripted_period_s,
     )
     scripted = ScriptedEstimator(
-        positions, trajectory, settings.scripted_range_m, settings.scripted_uncertainty
+        positions,
+        trajectory,
+        settings.scripted_range_m,
+        settings.scripted_uncertainty,
+        noise_rel=settings.scripted_noise,
     )
     return Estimation(scripted, settings.window_frames, scripted.drone_position)
 

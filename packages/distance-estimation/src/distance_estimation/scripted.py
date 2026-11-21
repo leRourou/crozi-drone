@@ -1,13 +1,15 @@
 """Estimateur simulé (en attendant le modèle) : un drone virtuel suit un cercle connu.
 
-La distance renvoyée est la vraie distance drone ↔ téléphone à l'instant de la fenêtre : la vérité
-terrain est connue, ce qui permet de tester la suite (③, ④). Le contenu audio est ignoré, mais une
-estimation n'est produite que pour une fenêtre réellement reçue.
+La distance renvoyée est la vraie distance drone ↔ téléphone à l'instant de la fenêtre,
+éventuellement bruitée (noise_rel) : la vérité terrain est connue, ce qui permet de tester
+la suite (③, ④). Le contenu audio est ignoré, mais une estimation n'est produite que pour
+une fenêtre réellement reçue.
 """
 
 from __future__ import annotations
 
 import math
+import random
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -53,11 +55,17 @@ class ScriptedEstimator:
         trajectory: CircleTrajectory,
         detection_range_m: float,
         uncertainty_rel: float,
+        noise_rel: float = 0.0,
+        rng: random.Random | None = None,
     ) -> None:
+        """noise_rel : écart-type relatif du bruit gaussien sur la distance annoncée (0 = exacte).
+        La détection reste décidée sur la vraie distance : le bruit n'ajoute ni n'ôte de drone."""
         self._phones = dict(phones)
         self._trajectory = trajectory
         self._detection_range_m = detection_range_m
         self._uncertainty_rel = uncertainty_rel
+        self._noise_rel = noise_rel
+        self._rng = rng or random.Random()
 
     def drone_position(self, t: float) -> Point:
         """Position vraie du drone virtuel : sert uniquement à vérifier la chaîne (affichage)."""
@@ -67,4 +75,6 @@ class ScriptedEstimator:
         distance = math.dist(self.drone_position(window.t), self._phones[window.profile])
         if distance > self._detection_range_m:
             return DistanceEstimate(window.profile, window.t, None)
+        # Bruit nul : gauss(0, 0) vaut exactement 0, la distance reste exacte.
+        distance = max(0.0, distance * (1 + self._rng.gauss(0.0, self._noise_rel)))
         return DistanceEstimate(window.profile, window.t, Range(distance, self._uncertainty_rel))

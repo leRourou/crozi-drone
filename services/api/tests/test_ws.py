@@ -296,6 +296,20 @@ def test_without_estimator_the_state_has_no_drone_view(client):
         assert ws.receive_json()["drone"] is None
 
 
+def test_scripted_noise_reaches_the_simulated_distances():
+    from api.main import make_estimation
+    from distance_estimation.estimator import AudioWindow
+
+    profiles = load_profiles()
+    window = AudioWindow("noe", "sid", 0.0, b"")
+    exact = make_estimation(Settings(estimator="scripted", scripted_range_m=100.0), profiles)
+    noisy = make_estimation(
+        Settings(estimator="scripted", scripted_range_m=100.0, scripted_noise=0.05), profiles
+    )
+    assert len({exact.estimator.estimate(window).range.distance_m for _ in range(5)}) == 1
+    assert len({noisy.estimator.estimate(window).range.distance_m for _ in range(5)}) == 5
+
+
 def test_state_is_pushed_every_state_period():
     with TestClient(fresh_app(state_period_ms=20)) as client, client.websocket_connect(
         "/ws/state"

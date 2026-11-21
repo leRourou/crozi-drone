@@ -128,6 +128,7 @@ virtuel sur une trajectoire connue).
 | `SCRIPTED_PERIOD_S` | 20 | durée d'un tour |
 | `SCRIPTED_RANGE_M` | 5 | portée de détection : au-delà, « pas de drone » |
 | `SCRIPTED_UNCERTAINTY` | 0.10 | incertitude relative annoncée avec chaque distance |
+| `SCRIPTED_NOISE` | 0 | écart-type relatif d'un bruit gaussien sur chaque distance (0 = exacte ; 0.05 ≈ 95 % des distances dans ± 10 %). La détection reste décidée sur la vraie distance. |
 
 Les durées `*_MS` sont des entiers strictement positifs en millisecondes ; les autres valeurs sont des
 réels (point décimal). Une valeur invalide empêche le serveur
