@@ -2,6 +2,7 @@ import { createPcmCapture, getCaptureSupport, WEBKIT_CAPTURE_CONTRACT } from "@e
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appendLog, clock, type LogLine } from "./logbuffer";
 import { isLittleEndian } from "./packetizer";
+import { PROFILES, type ProfileId } from "./profiles";
 import { type LogLevel, type Status, Streamer, subtleSha256Hex } from "./streamer";
 
 function socketUrl(): string {
@@ -31,6 +32,7 @@ const STATE_LABEL: Record<Status["state"], string> = {
 
 export function App() {
   const [status, setStatus] = useState<Status>({ state: "idle" });
+  const [profile, setProfile] = useState<ProfileId | null>(null); // non mémorisé : à choisir à chaque ouverture
   const [lines, setLines] = useState<LogLine[]>([]);
   const levelRef = useRef<HTMLButtonElement>(null);
   const nextId = useRef(0);
@@ -78,16 +80,34 @@ export function App() {
       </header>
 
       <section className="recorder">
+        <fieldset className="profiles" disabled={running}>
+          <legend>Profil</legend>
+          {PROFILES.map((p) => (
+            <label key={p.id}>
+              <input
+                type="radio"
+                name="profile"
+                value={p.id}
+                checked={profile === p.id}
+                onChange={() => setProfile(p.id)}
+              />
+              {p.label}
+            </label>
+          ))}
+        </fieldset>
         <button
           type="button"
           ref={levelRef}
           className={`record ${running ? "on" : ""}`}
           aria-label={running ? "Arrêter" : "Démarrer"}
-          onClick={() => (running ? streamer.stop() : streamer.start())}
+          disabled={profile === null}
+          onClick={() => (running ? streamer.stop() : profile && streamer.start(profile))}
         >
           <span className="icon" />
         </button>
-        <p className="hint">{running ? "Appuyer pour arrêter" : "Appuyer pour enregistrer"}</p>
+        <p className="hint">
+          {running ? "Appuyer pour arrêter" : profile ? "Appuyer pour enregistrer" : "Choisir un profil"}
+        </p>
         {lastError && <p className="error">{lastError.text}</p>}
         {webkit && <p className="warning">{WEBKIT_WARNING}</p>}
       </section>
@@ -95,6 +115,8 @@ export function App() {
       <details>
         <summary>Détails</summary>
         <dl className="status">
+          <dt>Profil</dt>
+          <dd>{status.profile ?? profile ?? "—"}</dd>
           <dt>Contrat</dt>
           <dd>{status.contract ?? `${expected.text} (prévu)`}</dd>
           <dt>Session</dt>

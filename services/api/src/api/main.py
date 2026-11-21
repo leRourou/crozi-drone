@@ -42,7 +42,7 @@ def _recorder_for(hello: Hello) -> WavRecorder | None:
     if os.environ.get("SAVE_SESSIONS") != "1":
         return None
     folder = Path(os.environ.get("RECORDINGS_DIR", DEFAULT_RECORDINGS))
-    return WavRecorder(folder / f"{hello.session_id}.wav")
+    return WavRecorder(folder / f"{hello.profile}_{hello.session_id}.wav")
 
 
 def _log_start(sid: str, hello: Hello) -> None:
@@ -51,6 +51,7 @@ def _log_start(sid: str, hello: Hello) -> None:
         kv(
             "session_start",
             sid=sid,
+            profile=hello.profile,
             contract=hello.contract,
             browser=short_browser(hello.user_agent),
             mic=s.get("microphone_label"),
@@ -151,6 +152,7 @@ class Connection:
             {
                 "type": "ready",
                 "session_id": str(self.session.hello.session_id),
+                "profile": self.session.hello.profile,
                 "server_time": time.time(),
             }
         )
@@ -200,7 +202,9 @@ class Connection:
     async def _end(self, end: End) -> None:
         ack = self.session.finish(end)
         self._log_end(end.reason, end, ack)
-        await self.ws.send_json({"type": "end_ack", **asdict(ack)})
+        await self.ws.send_json(
+            {"type": "end_ack", **asdict(ack), "profile": self.session.hello.profile}
+        )
         await self.ws.close()
 
     def _log_end(self, reason: str, end: End | None = None, ack: EndAck | None = None) -> None:
@@ -213,6 +217,7 @@ class Connection:
             kv(
                 "session_end",
                 sid=self.sid,
+                profile=session.hello.profile,
                 duration_s=time.monotonic() - session.started_at,
                 frames=session.frames_received,
                 client_frames=end.frames if end else None,

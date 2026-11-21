@@ -22,6 +22,12 @@ def test_valid_strict_hello_is_parsed(hello):
     assert str(parsed.session_id) == hello["session_id"]
     assert parsed.contract == "edth.web-pcm.v1"
     assert parsed.capture_settings == hello["capture_settings"]
+    assert parsed.profile == "axel"
+
+
+@pytest.mark.parametrize("profile", ["axel", "maxence", "tristan", "noe", "charlene"])
+def test_each_team_phone_profile_is_accepted(profile):
+    assert parse_hello(raw(make_hello(profile=profile))).profile == profile
 
 
 def test_webkit_profile_is_accepted():
@@ -33,6 +39,14 @@ def test_webkit_profile_is_accepted():
         }
     )
     assert parse_hello(raw(hello)).contract == "edth.web-pcm.webkit.v1"
+
+
+def test_hello_without_profile_is_refused():
+    hello = make_hello()
+    del hello["profile"]
+    with pytest.raises(ProtocolError) as err:
+        parse_hello(raw(hello))
+    assert err.value.code == "unknown_profile"
 
 
 @pytest.mark.parametrize(
@@ -50,6 +64,11 @@ def test_webkit_profile_is_accepted():
         ({"session_id": 12}, "invalid_hello"),
         ({"type": "ping"}, "invalid_hello"),
         ({"capture_settings": "nope"}, "invalid_hello"),
+        ({"profile": "bob"}, "unknown_profile"),
+        ({"profile": None}, "unknown_profile"),
+        ({"profile": 1}, "unknown_profile"),
+        ({"profile": "Axel"}, "unknown_profile"),
+        ({"profile": ["axel"]}, "unknown_profile"),
     ],
 )
 def test_invalid_hello_is_refused(overrides, code):

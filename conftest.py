@@ -29,6 +29,7 @@ def make_hello(**overrides):
         "type": "hello",
         "protocol": "crozidrone.audio-stream.v1",
         "session_id": str(uuid.uuid4()),
+        "profile": "axel",
         "capture_settings": settings,
         "captured_at": "2026-11-21T10:00:00.000Z",
         "user_agent": settings["browser"],

@@ -13,6 +13,8 @@ from typing import Any, Literal
 
 PROTOCOL = "crozidrone.audio-stream.v1"
 KNOWN_CONTRACTS = frozenset({"edth.web-pcm.v1", "edth.web-pcm.webkit.v1"})
+# Téléphones de l'équipe ; même liste dans web/src/capture/profiles.ts (réf. docs/protocol.md).
+KNOWN_PROFILES = frozenset({"axel", "maxence", "tristan", "noe", "charlene"})
 SAMPLE_RATE = 48_000
 SEQ_BYTES = 4
 SAMPLE_BYTES = 2
@@ -42,6 +44,7 @@ class ProtocolError(Exception):
 @dataclass(frozen=True)
 class Hello:
     session_id: uuid.UUID
+    profile: str
     contract: str
     capture_settings: dict[str, Any]
     captured_at: str
@@ -94,6 +97,12 @@ def _parse_uuid(value: Any) -> uuid.UUID:
         raise ProtocolError("invalid_hello", f"session_id is not a UUID: {value!r}") from exc
 
 
+def _check_profile(value: Any) -> str:
+    if not isinstance(value, str) or value not in KNOWN_PROFILES:
+        raise ProtocolError("unknown_profile", f"profile={value!r}")
+    return value
+
+
 def _check_settings(settings: Any) -> str:
     if not isinstance(settings, dict):
         raise ProtocolError("invalid_hello", "capture_settings must be an object")
@@ -114,10 +123,12 @@ def parse_hello(text: str) -> Hello:
     if obj.get("protocol") != PROTOCOL:
         raise ProtocolError("unknown_protocol", f"protocol={obj.get('protocol')!r}")
     session_id = _parse_uuid(obj.get("session_id"))
+    profile = _check_profile(obj.get("profile"))
     settings = obj.get("capture_settings")
     contract = _check_settings(settings)
     return Hello(
         session_id=session_id,
+        profile=profile,
         contract=contract,
         capture_settings=settings,
         captured_at=str(obj.get("captured_at", "")),

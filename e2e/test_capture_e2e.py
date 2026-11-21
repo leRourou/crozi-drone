@@ -116,7 +116,10 @@ def test_fake_microphone_reaches_the_server_bit_exact(stack, tmp_path):
         page = browser.new_page()
         page.goto(stack["url"])
         page.get_by_text("Détails").click()  # journal replié par défaut
-        page.get_by_role("button", name="Démarrer").click()
+        start = page.get_by_role("button", name="Démarrer")
+        assert start.is_disabled()  # profil obligatoire
+        page.get_by_label("Téléphone de Noé").check()
+        start.click()
         page.get_by_text("ready session=").wait_for(timeout=15_000)
         page.wait_for_timeout(CAPTURE_SECONDS * 1000)
         page.get_by_role("button", name="Arrêter").click()
@@ -129,10 +132,13 @@ def test_fake_microphone_reaches_the_server_bit_exact(stack, tmp_path):
     print(text, server_log, sep="\n--- server ---\n")
     assert "end_ack" in text and "match=✅" in text, text
     assert "match=✅" in server_log
+    assert "ready session=" in text and "profile=noe" in text, text
+    assert "profil renvoyé" not in text, text
+    assert "profile=noe" in server_log
 
     ratios = [float(r) for r in re.findall(r"\bstats .*?rt=([0-9.]+)", text)]
     assert ratios, "aucun message stats reçu"
     assert 0.9 <= ratios[-1] <= 1.1, ratios
 
-    [recording] = list(stack["recordings"].glob("*.wav"))
+    [recording] = list(stack["recordings"].glob("noe_*.wav"))
     assert dominant_frequency(recording) == pytest.approx(TONE_HZ, abs=2.0)

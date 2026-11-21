@@ -13,6 +13,7 @@ import type {
 } from "@edth/capture";
 import { WEBKIT_CAPTURE_CONTRACT } from "@edth/capture";
 import { Packetizer } from "./packetizer";
+import type { ProfileId } from "./profiles";
 
 export const PROTOCOL = "crozidrone.audio-stream.v1";
 const WAV_HEADER_BYTES = 44;
@@ -22,6 +23,7 @@ export type LogLevel = "info" | "warn" | "error";
 export type State = "idle" | "starting" | "streaming" | "error";
 export interface Status {
   state: State;
+  profile?: ProfileId;
   contract?: ContractId;
   webkit?: boolean;
   sessionId?: string;
@@ -99,6 +101,7 @@ class Session {
     private readonly events: StreamerEvents,
     private readonly onFinished: (outcome: Outcome) => void,
     private readonly restartedAt: number | null,
+    private readonly profile: ProfileId,
   ) {
     this.id = deps.uuid();
     this.packetizer = new Packetizer((packet) => this.sendPacket(packet));
@@ -151,6 +154,7 @@ class Session {
         type: "hello",
         protocol: PROTOCOL,
         session_id: this.id,
+        profile: this.profile,
         capture_settings: start.captureSettings,
         captured_at: start.capturedAt,
         user_agent: this.deps.userAgent,
@@ -168,8 +172,8 @@ class Session {
     if (webkit) {
       this.events.log("profil WebKit : seul l'anti-écho est vérifié (NS/AGC inconnus)", "warn");
     }
-    this.events.status({ state: "starting", contract: s.capture_contract, webkit, sessionId: this.id });
-    this.contract = { contract: s.capture_contract, webkit, sessionId: this.id };
+    this.contract = { profile: this.profile, contract: s.capture_contract, webkit, sessionId: this.id };
+    this.events.status({ state: "starting", ...this.contract });
   }
 
   private contract: Omit<Status, "state"> = {};
@@ -183,7 +187,7 @@ class Session {
     const msg = JSON.parse(text) as { type: string } & Record<string, unknown>;
     switch (msg.type) {
       case "ready":
-        return this.onReady();
+        return this.onReady(msg);
       case "pong":
         return this.events.log(`rtt=${(this.deps.now() - Number(msg.t)).toFixed(0)}ms`);
       case "stats":
@@ -195,9 +199,10 @@ class Session {
     }
   }
 
-  private onReady(): void {
+  private onReady(msg: Record<string, unknown>): void {
     this.ready = true;
-    this.events.log(`ready session=${this.id.slice(0, 8)}`);
+    this.events.log(`ready session=${this.id.slice(0, 8)} profile=${this.profile}`);
+    this.checkEcho(msg.profile);
     this.queue.splice(0).forEach((packet) => this.socket.send(packet));
     this.events.status({ state: "streaming", ...this.contract });
     this.pinger = setInterval(() => this.ping(), PING_PERIOD_MS);
@@ -220,8 +225,17 @@ class Session {
 
   private onEndAck(msg: Record<string, unknown>): void {
     const ok = msg.match === true;
-    this.events.log(`end_ack frames=${msg.frames_received} match=${ok ? "✅" : "❌"}`, ok ? "info" : "warn");
+    const text = `end_ack frames=${msg.frames_received} match=${ok ? "✅" : "❌"} profile=${this.profile}`;
+    this.events.log(text, ok ? "info" : "warn");
+    this.checkEcho(msg.profile);
     this.finish(this.pendingOutcome);
+  }
+
+  /** Preuve que le serveur a rattaché l'audio au bon téléphone. */
+  private checkEcho(echoed: unknown): void {
+    if (echoed !== this.profile) {
+      this.events.log(`profil renvoyé par le serveur (${echoed}) ≠ profil choisi (${this.profile})`, "error");
+    }
   }
 
   private failCapture(error: CaptureError): void {
@@ -257,7 +271,7 @@ export class Streamer {
   ) {}
 
   /** À appeler directement dans le gestionnaire du clic (geste utilisateur). */
-  start(): void {
+  start(profile: ProfileId): void {
     if (this.active) return;
     if (!this.deps.littleEndian) {
       this.events.log("plateforme big-endian : envoi Int16 LE impossible, démarrage refusé", "error");
@@ -265,8 +279,8 @@ export class Streamer {
       return;
     }
     this.active = true;
-    this.events.status({ state: "starting" });
-    this.open(null);
+    this.events.status({ state: "starting", profile });
+    this.open(null, profile);
   }
 
   stop(): void {
@@ -274,14 +288,16 @@ export class Streamer {
     this.session?.stop();
   }
 
-  private open(restartedAt: number | null): void {
-    this.session = new Session(this.deps, this.events, (outcome) => this.finished(outcome), restartedAt);
+  private open(restartedAt: number | null, profile: ProfileId): void {
+    const onFinished = (outcome: Outcome) => this.finished(outcome, profile);
+    this.session = new Session(this.deps, this.events, onFinished, restartedAt, profile);
   }
 
-  private finished(outcome: Outcome): void {
+  /** profile : celui de la session terminée, repris tel quel par la relance. */
+  private finished(outcome: Outcome, profile: ProfileId): void {
     if (outcome === "limit" && this.active) {
       this.events.log("limite du module (~175 s) atteinte : nouvelle session, trou assumé", "warn");
-      this.open(this.deps.now());
+      this.open(this.deps.now(), profile);
       return;
     }
     this.active = false;

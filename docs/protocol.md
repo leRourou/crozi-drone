@@ -14,9 +14,16 @@ Transport temps réel du PCM produit par le module partagé `vendor/edth/audio_c
 ### `hello` (texte, premier message obligatoire)
 ```json
 { "type": "hello", "protocol": "crozidrone.audio-stream.v1", "session_id": "<uuid v4>",
+  "profile": "axel|maxence|tristan|noe|charlene",
   "capture_settings": { "…": "captureSettings renvoyé par start(), intégral" },
   "captured_at": "<ISO UTC>", "user_agent": "…" }
 ```
+
+`profile` : téléphone de l'équipe choisi sur la page avant d'enregistrer (obligatoire, non mémorisé).
+Identifiants ASCII stables. Les libellés affichés sont « Téléphone d'Axel », « … de Maxence », « … de Tristan »,
+« … de Noé » et « … de Charlène ». **Ce document est la référence** de la liste, dupliquée dans
+`web/src/capture/profiles.ts` et `KNOWN_PROFILES` (`audio_capture/protocol.py`). Une relance après la
+limite du module garde le profil.
 
 ### Paquets audio (binaire)
 `[seq : uint32 LE][échantillons Int16 LE]`
@@ -40,26 +47,33 @@ Transport temps réel du PCM produit par le module partagé `vendor/edth/audio_c
 
 | Message | Contenu |
 | --- | --- |
-| `ready` | `{"type":"ready","session_id":…,"server_time":<epoch s>}` |
+| `ready` | `{"type":"ready","session_id":…,"profile":…,"server_time":<epoch s>}` |
 | `error` | `{"type":"error","code":…,"message":…}` puis fermeture (code 1008) |
 | `pong` | `{"type":"pong","t":…}` |
 | `stats` | chaque seconde : `packets_per_s`, `audio_s`, `rt_ratio`, `kbps`, `peak_dbfs`, `rms_dbfs` (`null` = silence numérique), `max_gap_ms`, `gaps` |
-| `end_ack` | `{"type":"end_ack","frames_received":N,"pcm_sha256":"<hex>","match":true\|false}` puis fermeture |
+| `end_ack` | `{"type":"end_ack","frames_received":N,"pcm_sha256":"<hex>","match":true\|false,"profile":…}` puis fermeture |
 
 `match` est vrai si et seulement si le hash **et** le nombre d'échantillons du client égalent ceux
 calculés par le serveur sur les octets reçus.
+
+`profile` est renvoyé dans `ready` et dans `end_ack`. Le client logue une erreur s'il diffère du profil envoyé.
 
 ## Validation côté serveur
 
 `hello` : `protocol` connu ; `capture_contract` ∈ {`edth.web-pcm.v1`, `edth.web-pcm.webkit.v1`} ;
 `sample_rate == 48000`, `channels == 1`, `sample_format == "pcm_s16le"`,
 `channel_selection == "first"`, `recorder == "audio_worklet_pcm"` (égalité stricte de type) ;
-`session_id` UUID valide.
+`session_id` UUID valide ; `profile` ∈ liste ci-dessus (chaîne exacte, sensible à la casse).
 
 Paquets : au moins 6 octets, partie audio de longueur paire, `seq` égal à la valeur attendue.
 
-Codes d'erreur : `invalid_hello`, `unknown_protocol`, `unknown_contract`, `invalid_format`,
+Codes d'erreur : `invalid_hello`, `unknown_protocol`, `unknown_profile`, `unknown_contract`, `invalid_format`,
 `invalid_packet`, `discontinuity`, `unexpected_message`.
+
+## Enregistrement (`SAVE_SESSIONS=1`)
+
+`$RECORDINGS_DIR/<profile>_<session_id>.wav` (par défaut `./recordings/`). Les logs `session_start` et
+`session_end` portent `profile=…`.
 
 ## Définitions des statistiques
 
