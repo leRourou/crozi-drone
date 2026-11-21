@@ -55,6 +55,7 @@ def localiser_drone(capteurs, distances, tol=0.10, z_sol=0.0,
 
     return None
 
+
 """
 # Exemple
 if __name__ == "__main__":
