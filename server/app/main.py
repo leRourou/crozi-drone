@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, WebSocket
+from fastapi.staticfiles import StaticFiles
 
 from app.logfmt import kv, short_browser
 from app.protocol import End, Hello, Ping, ProtocolError, parse_control, parse_hello, parse_packet
@@ -25,7 +26,6 @@ DEFAULT_RECORDINGS = Path(__file__).resolve().parents[2] / "recordings"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s")
 log = logging.getLogger("thc.audio")
-app = FastAPI(title="THC audio stream")
 
 
 def _recorder_for(hello: Hello) -> WavRecorder | None:
@@ -214,6 +214,18 @@ class Connection:
         )
 
 
-@app.websocket("/ws/audio")
 async def audio_stream(ws: WebSocket) -> None:
     await Connection(ws).run()
+
+
+def create_app(front_dir: Path | None) -> FastAPI:
+    """front_dir : build Vite servi à la racine (même origine que /ws/audio), ou None (dev)."""
+    application = FastAPI(title="THC audio stream")
+    application.add_api_websocket_route("/ws/audio", audio_stream)
+    if front_dir is not None:
+        application.mount("/", StaticFiles(directory=front_dir, html=True), name="front")
+    return application
+
+
+_front_dir = os.environ.get("FRONT_DIR")
+app = create_app(Path(_front_dir) if _front_dir else None)

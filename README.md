@@ -50,6 +50,15 @@ Sur le téléphone : Chrome (Android) ou Safari (iOS) à jour, micro intégré (
 `micro ok … contract=…`, `ready`, des lignes `stats … rt≈1.00 kbps≈768`, puis après **Arrêter**
 `end_ack … match=✅`.
 
+## Déploiement (Docker / Coolify)
+Image unique (`Dockerfile` à la racine) : FastAPI sert le front buildé et `/ws/audio` sur la même
+origine. Le HTTPS (obligatoire pour le micro) est fourni par le proxy de Coolify.
+```bash
+docker build -t thc-audio . && docker run --rm -p 8000:8000 thc-audio   # http://localhost:8000
+```
+Coolify : build pack **Dockerfile**, port exposé **8000**, domaine en `https://`.
+Enregistrement optionnel : `SAVE_SESSIONS=1` + volume persistant monté sur `/data/recordings`.
+
 ## Tests
 ```bash
 cd server && uv run ruff check && uv run pytest          # 72 tests
