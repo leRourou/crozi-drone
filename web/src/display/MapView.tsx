@@ -1,11 +1,11 @@
-import type { KeyboardEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { metres } from "./format";
 import { DroneIcon, PhoneIcon, PX } from "./icons";
-import { annulusPath, hearsDrone, listening, rangeRings } from "./mapgeom";
+import { annulusPath, phoneMarker, rangeRings } from "./mapgeom";
 import { outlinePath, ROOM } from "./room";
+import { buttonProps, type Selection } from "./selection";
 import type { StateMessage } from "./state";
 
-export type Selection = { kind: "phone"; profile: string } | { kind: "drone" } | null;
 
 interface Props {
   state: StateMessage;
@@ -24,22 +24,11 @@ const VIEWBOX = [
 const cote = (v: number) => v.toFixed(2).replace(".", ",");
 
 function Clickable(props: { label: string; selected: boolean; onSelect: () => void; className: string; x: number; y: number; data?: Record<string, string>; children: ReactNode }) {
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      props.onSelect();
-    }
-  };
   return (
     <g
       className={`${props.className} ${props.selected ? "selected" : ""}`}
       transform={`translate(${props.x} ${props.y})`}
-      role="button"
-      tabIndex={0}
-      aria-label={props.label}
-      aria-pressed={props.selected}
-      onClick={props.onSelect}
-      onKeyDown={onKey}
+      {...buttonProps(props.label, props.selected, props.onSelect)}
       {...props.data}
     >
       {props.children}
@@ -139,21 +128,19 @@ export function MapView({ state, selected, onSelect }: Props) {
         </Clickable>
       )}
       {state.phones.map((phone) => {
-        const state_ = listening(phone.status);
-        const isSelected = selected?.kind === "phone" && selected.profile === phone.profile;
-        const detecting = hearsDrone(phone);
+        const view = phoneMarker(phone);
         return (
           <Clickable
             key={phone.profile}
-            label={`${phone.label} : ${phone.status === "streaming" ? "à l'écoute" : "pas à l'écoute"}${detecting ? ", détecte le drone" : ""}`}
-            selected={isSelected}
+            label={view.label}
+            selected={selected?.kind === "phone" && selected.profile === phone.profile}
             onSelect={() => onSelect({ kind: "phone", profile: phone.profile })}
-            className={`phone-marker ${state_} ${detecting ? "detecting" : ""}`}
+            className={view.className}
             x={phone.position_m.x}
             y={phone.position_m.y}
-            data={{ "data-profile": phone.profile, "data-listening": state_, "data-detecting": String(detecting) }}
+            data={view.data}
           >
-            {state_ === "on" && <circle r={0.48} className="pulse" />}
+            {view.data["data-listening"] === "on" && <circle r={0.48} className="pulse" />}
             <circle r={0.62} className="selection" />
             <g transform={`scale(${PX})`}><PhoneIcon /></g>
             <circle cx={0.42} cy={-0.42} r={0.14} className="listening-dot" />

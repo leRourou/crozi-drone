@@ -13,7 +13,7 @@ import {
 } from "./format";
 import { Glyph } from "./icons";
 import { listening } from "./mapgeom";
-import type { Selection } from "./MapView";
+import type { Selection } from "./selection";
 import type { DroneView, EstimatorName, PhoneState, StateMessage } from "./state";
 
 interface Props {

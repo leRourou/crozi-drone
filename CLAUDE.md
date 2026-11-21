@@ -72,8 +72,12 @@ web/src/capture/          ① page téléphone : packetizer.ts, streamer.ts (ses
                              wakelock.ts (écran allumé), App.tsx (UI)
 web/src/display/          ④ plan de salle (display.html ; /display redirige, en dev Vite taper /display.html) :
                              state.ts (message validé à l'arrivée), stateclient.ts (abonnement, reconnexion),
-                             room.ts (plan de la salle en mètres), mapgeom.ts (cercles, écoute), format.ts,
-                             MapView.tsx / Panel.tsx / icons.tsx / App.tsx (UI)
+                             room.ts (plan de la salle en mètres, plafond), mapgeom.ts (cercles, écoute, marqueur
+                             téléphone), selection.ts (sélection, bouton accessible), format.ts,
+                             MapView.tsx / Panel.tsx / icons.tsx / App.tsx (UI, bascule 2D / 3D) ;
+                             vue 3D chargée à la demande (three + React Three Fiber) : scene3d.ts (géométrie pure,
+                             `toThree` seule conversion salle → three, marqueurs, projection), Map3D.tsx,
+                             scene/ (Room3D, Markers3D, Overlays3D : marqueurs = <div> projetées, pas drei <Html>)
 web/src/shared/           edth-capture.d.ts (types du module partagé), profiles.ts (contrat, alias `@contracts`),
                              net.ts (URL ws/wss, délai de reconnexion), theme.css (palette)
 packages/localization/    ③ distances → position : calculation.py `localiser_drone` (capteurs 3D, `tol`
@@ -103,7 +107,7 @@ n'est pas un module ①–④ mais une bibliothèque figée (comme numpy), impor
 
 ## Qualité
 `~/tools/crapper/crapper`, `~/tools/dryer/dryer`, `~/tools/mutator/mutator` (composants UI purs
-exclus : `App.tsx`, `main.tsx`, `MapView.tsx`, `Panel.tsx`, `icons.tsx`). `vendor/` est ignoré par ces outils ;
+exclus : `App.tsx`, `main.tsx`, `MapView.tsx`, `Map3D.tsx`, `scene/*.tsx`, `Panel.tsx`, `icons.tsx`). `vendor/` est ignoré par ces outils ;
 la copie figée `packages/features/src` est exclue (ruff aussi) : ne pas la corriger.
 - Python (depuis la racine) : `coverage run --source=packages,services -m pytest` puis
   `coverage lcov -o target/coverage/python/lcov.info`, avant

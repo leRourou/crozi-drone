@@ -8,6 +8,8 @@ type Pt = readonly [number, number];
 export const ROOM = {
   width_m: 10.4,
   height_m: 20.9,
+  /** Hauteur sous plafond (hypothèse : 3 m, à corriger après relevé). */
+  ceiling_m: 3,
   /** Contour intérieur des murs, avec les deux piliers en saillie sur le mur ouest. */
   outline: [
     [0, 0], [10.4, 0], [10.4, 20.9], [0, 20.9], [0, 12.79], [1.06, 12.79],

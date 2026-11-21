@@ -6,6 +6,8 @@ export interface Ring {
   readonly profile: string;
   readonly cx: number;
   readonly cy: number;
+  /** Hauteur du téléphone : centre de la sphère de distance en 3D. */
+  readonly cz: number;
   readonly r: number;
   readonly inner: number;
   readonly outer: number;
@@ -16,7 +18,7 @@ export function rangeRings(phones: readonly PhoneState[]): Ring[] {
   return phones.flatMap(({ profile, position_m, detection }) => {
     if (!detection?.drone) return [];
     const { distance_m: r, uncertainty_rel: u, fresh } = detection;
-    const ring = { profile, cx: position_m.x, cy: position_m.y, r };
+    const ring = { profile, cx: position_m.x, cy: position_m.y, cz: position_m.z, r };
     return [{ ...ring, inner: Math.max(0, r * (1 - u)), outer: r * (1 + u), fresh }];
   });
 }
@@ -44,4 +46,15 @@ const LISTENING: Record<PhoneStatus, Listening> = {
 /** Indicateur d'écoute d'un téléphone. */
 export function listening(status: PhoneStatus): Listening {
   return LISTENING[status];
+}
+
+/** Marqueur d'un téléphone sur le plan (2D ou 3D) : nom accessible, classes et attributs lus par les tests e2e. */
+export function phoneMarker(phone: PhoneState) {
+  const state = listening(phone.status);
+  const detecting = hearsDrone(phone);
+  return {
+    label: `${phone.label} : ${phone.status === "streaming" ? "à l'écoute" : "pas à l'écoute"}${detecting ? ", détecte le drone" : ""}`,
+    className: `phone-marker ${state}${detecting ? " detecting" : ""}`,
+    data: { "data-profile": phone.profile, "data-listening": state, "data-detecting": String(detecting) },
+  };
 }

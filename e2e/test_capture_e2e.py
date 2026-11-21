@@ -115,6 +115,7 @@ def launch_with_fake_mic(pw, tmp_path):
             "--use-fake-ui-for-media-stream",
             f"--use-file-for-fake-audio-capture={tone}",
             "--autoplay-policy=no-user-gesture-required",
+            "--enable-unsafe-swiftshader",  # WebGL logiciel en headless : vue 3D du plan
         ]
     )
 
@@ -149,6 +150,14 @@ def test_the_room_map_shows_the_listening_phone_and_its_simulated_distance(stack
         display.locator('.phone-marker[data-profile="noe"]').click(force=True)
         details = display.get_by_label("Détails : Téléphone de Noé")
         details.get_by_text("À l'écoute").wait_for()
+        # Vue 3D : mêmes marqueurs (surcouches HTML sur le canvas), même sélection, même panneau.
+        display.get_by_role("button", name="3D").click()
+        display.locator(".map3d canvas").wait_for(timeout=15_000)
+        display.locator('.marker3d.phone-marker[data-profile="noe"][data-listening="on"]').wait_for(timeout=15_000)
+        display.locator('.marker3d.phone-marker[data-profile="tristan"]').click()
+        display.get_by_label("Détails : Téléphone de Tristan").wait_for()
+        display.get_by_role("button", name="2D").click()
+        display.locator("svg.map").wait_for()
         browser.close()
 
     assert listening == ["on", "never", "never"], listening
