@@ -11,3 +11,4 @@ target/
 dist/
 front/test-results/
 e2e/artifacts/
+coverage/
