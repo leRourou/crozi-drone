@@ -126,6 +126,7 @@ virtuel sur une trajectoire connue) ou `model` (vrai modèle, release du repo ML
 | `TRACK_TIMEOUT_MS` | 1000 | piste perdue sans distance acceptée depuis ce délai |
 | `TRACK_ALTITUDE_M` | 1.5 | piste : altitude attendue du drone (≥ 0) |
 | `TRACK_ALTITUDE_STD_M` | 0.5 | piste : souplesse de cette altitude (écart-type) |
+| `TRACK_MAX_RADIUS_M` | 1.0 | piste : rayon maximal ; au-delà, une piste confirmée est abandonnée |
 | `SCRIPTED_OFFSET_EAST_M` | 0.5 | drone simulé : centre du cercle, décalage vers l'est depuis le barycentre des téléphones |
 | `SCRIPTED_OFFSET_NORTH_M` | 3 | idem vers le nord (y décroissant) |
 | `SCRIPTED_RADIUS_M` | 3 | rayon du cercle |
@@ -192,9 +193,12 @@ et `frozen/ml.py`, `detection/` et `distance/model.joblib`, `parity/fixture.json
   détections, élargie si `degraded`.
 - `track` : piste du drone, filtre de Kalman étendu (`packages/localization/tracking.py`) sur les
   distances, une correction par détection nouvelle, à son instant ; indépendante de `status` (elle se
-  poursuit avec 1 ou 2 téléphones). Démarre sur la `zone` d'un tick qui apporte des détections
-  nouvelles ; repart de la zone après 5 corrections rejetées d'affilée (test χ² à 99 %) ; perdue
-  (`null`) sans distance acceptée depuis `TRACK_TIMEOUT_MS`. Position et vitesse horizontale prédites à
+  poursuit avec 1 ou 2 téléphones tant qu'elle reste précise). Démarre sur la `zone` d'un tick qui
+  apporte des détections nouvelles ; repart de la zone après 5 distances rejetées d'affilée (test χ² à
+  99 %). Jugée une fois par tick : `null` tant que son rayon dépasse `TRACK_MAX_RADIUS_M` (piste
+  provisoire, ou trop imprécise : un seul téléphone situe le drone sur un cercle, pas le long de ce
+  cercle) ; une piste confirmée qui le dépasse est abandonnée (seule une zone la relance) ; perdue
+  aussi sans distance acceptée depuis `TRACK_TIMEOUT_MS`. Position et vitesse horizontale prédites à
   l'instant du calcul ; disque `radius_m` = 2 σ ; altitude tirée vers `TRACK_ALTITUDE_M` (téléphones
   coplanaires : les distances seules disent peu de z) et jamais sous le sol. L'incertitude relative d'une
   distance est lue comme une borne à ≈ 2 σ.

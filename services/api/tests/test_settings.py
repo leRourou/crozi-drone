@@ -19,6 +19,7 @@ def test_defaults_without_environment():
         track_timeout_ms=1000,
         track_altitude_m=1.5,
         track_altitude_std_m=0.5,
+        track_max_radius_m=1.0,
         scripted_offset_east_m=0.5,
         scripted_offset_north_m=3.0,
         scripted_radius_m=3.0,
@@ -73,10 +74,12 @@ def test_the_track_values_come_from_their_variables():
         "TRACK_TIMEOUT_MS": "2500",
         "TRACK_ALTITUDE_M": "0",
         "TRACK_ALTITUDE_STD_M": "0.25",
+        "TRACK_MAX_RADIUS_M": "1.5",
     }
     s = load_settings(env)
     assert (s.track_accel_std, s.track_timeout_s) == (3.0, 2.5)
     assert (s.track_altitude_m, s.track_altitude_std_m) == (0.0, 0.25)
+    assert s.track_max_radius_m == 1.5
 
 
 def test_seconds_are_derived_from_milliseconds():
@@ -99,6 +102,7 @@ def test_window_frames_at_48_khz():
         ({"TRACK_TIMEOUT_MS": "0"}, "TRACK_TIMEOUT_MS"),
         ({"TRACK_ALTITUDE_M": "-1"}, "TRACK_ALTITUDE_M"),
         ({"TRACK_ALTITUDE_STD_M": "0"}, "TRACK_ALTITUDE_STD_M"),
+        ({"TRACK_MAX_RADIUS_M": "0"}, "TRACK_MAX_RADIUS_M"),
         ({"DETECTION_FRESH_MS": "abc"}, "DETECTION_FRESH_MS"),
         ({"DETECTION_FRESH_MS": ""}, "DETECTION_FRESH_MS"),
         ({"FUSION_SPREAD_MS": "0"}, "FUSION_SPREAD_MS"),

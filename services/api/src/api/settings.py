@@ -59,6 +59,7 @@ class Settings:
     track_timeout_ms: int = _setting("TRACK_TIMEOUT_MS", _MS, 1000)  # piste perdue sans distance
     track_altitude_m: float = _setting("TRACK_ALTITUDE_M", _NON_NEGATIVE, 1.5)  # altitude attendue
     track_altitude_std_m: float = _setting("TRACK_ALTITUDE_STD_M", _POSITIVE, 0.5)  # sa souplesse
+    track_max_radius_m: float = _setting("TRACK_MAX_RADIUS_M", _POSITIVE, 1.0)  # au-delà : abandon
     # Drone simulé (DISTANCE_ESTIMATOR=scripted) : cercle près des téléphones, repère de la salle
     scripted_offset_east_m: float = _setting("SCRIPTED_OFFSET_EAST_M", _REAL, 0.5)
     scripted_offset_north_m: float = _setting("SCRIPTED_OFFSET_NORTH_M", _REAL, 3.0)

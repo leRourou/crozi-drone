@@ -78,6 +78,7 @@ class Tracker:
             settings.track_timeout_s,
             settings.track_altitude_m,
             settings.track_altitude_std_m,
+            settings.track_max_radius_m,
         )
         self._seen: dict[str, float] = {}  # dernière détection utilisée, par téléphone
 
@@ -88,10 +89,8 @@ class Tracker:
         (re)démarrer, et seulement avec des détections nouvelles. Renvoie la piste prédite à now."""
         new = [r for r in rangings if r.received_at > self._seen.get(r.profile, -math.inf)]
         self._seen.update((r.profile, r.received_at) for r in new)
-        # Une correction par détection, à son instant : les téléphones ne mesurent pas ensemble.
-        for r in sorted(new, key=lambda r: r.received_at):
-            mesure = Mesure(r.position, r.distance_m, r.uncertainty_rel)
-            self._suivi.mise_a_jour([mesure], r.received_at, _zone(zone))
+        mesures = [Mesure(r.position, r.distance_m, r.uncertainty_rel, r.received_at) for r in new]
+        self._suivi.mise_a_jour(mesures, now, _zone(zone))
         return _track_view(self._suivi.etat(now))
 
 

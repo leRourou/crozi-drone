@@ -133,11 +133,25 @@ def test_without_estimator_there_is_no_drone_view():
     assert registry.snapshot(0.0, server_time=0.0)["drone"] is None
 
 
-def test_the_track_starts_where_the_drone_is_located():
-    drone = fuse(registry_with("noe", "tristan", "maxence"))
-    track = drone["track"]
+def confirmed_track():
+    """Trois téléphones détectent à chaque tick jusqu'à t = 0,5 : la piste est confirmée."""
+    registry, sessions = registry_and_sessions("noe", "tristan", "maxence")
+    tracker = new_tracker()
+    fuse(registry, now=0.0, tracker=tracker)
+    for now in (0.25, 0.5):
+        detect(sessions, PHONES, now=now)
+        fuse(registry, now=now, tracker=tracker)
+    return registry, sessions, tracker
+
+
+def test_the_track_is_shown_once_confirmed_where_the_drone_is():
+    born = fuse(registry_with("noe", "tristan", "maxence"))
+    # zone plus large que TRACK_MAX_RADIUS_M, mais les trois distances du tick confirment la piste
+    assert born["zone"]["radius_m"] > 1.0 >= born["track"]["radius_m"]
+    registry, _, tracker = confirmed_track()
+    track = fuse(registry, now=0.5, tracker=tracker)["track"]
     assert set(track) == {"x_m", "y_m", "z_m", "vx_mps", "vy_mps", "radius_m", "z_min_m", "z_max_m"}
-    assert math.dist((track["x_m"], track["y_m"]), DRONE[:2]) < track["radius_m"]
+    assert math.dist((track["x_m"], track["y_m"]), DRONE[:2]) < track["radius_m"] <= 1.0
     assert track["z_min_m"] <= track["z_m"] <= track["z_max_m"]
 
 
@@ -146,9 +160,7 @@ def test_no_track_without_a_located_drone():
 
 
 def test_the_track_goes_on_with_fewer_than_three_phones():
-    registry, sessions = registry_and_sessions("noe", "tristan", "maxence")
-    tracker = new_tracker()
-    fuse(registry, now=0.0, tracker=tracker)
+    registry, sessions, tracker = confirmed_track()
     detect(sessions, ("noe",), now=0.75)
     drone = fuse(registry, now=0.75, tracker=tracker)
     assert drone["status"] == "insufficient"
@@ -156,21 +168,17 @@ def test_the_track_goes_on_with_fewer_than_three_phones():
 
 
 def test_each_detection_corrects_the_track_only_once():
-    registry, sessions = registry_and_sessions("noe", "tristan", "maxence")
-    tracker = new_tracker()
-    fuse(registry, now=0.0, tracker=tracker)
-    detect(sessions, PHONES, now=0.25)
-    corrected = fuse(registry, now=0.25, tracker=tracker)["track"]["radius_m"]
-    later = fuse(registry, now=0.5, tracker=tracker)["track"]["radius_m"]
+    registry, sessions, tracker = confirmed_track()
+    detect(sessions, PHONES, now=0.75)
+    corrected = fuse(registry, now=0.75, tracker=tracker)["track"]["radius_m"]
+    later = fuse(registry, now=1.0, tracker=tracker)["track"]["radius_m"]
     assert later > corrected  # sans détection nouvelle, l'incertitude ne fait que croître
 
 
-def test_the_track_is_lost_without_detection_for_too_long():
-    registry = registry_with("noe", "tristan", "maxence")
-    tracker = new_tracker()
-    fuse(registry, now=0.0, tracker=tracker)
-    assert fuse(registry, now=1.0, tracker=tracker)["track"] is not None
-    assert fuse(registry, now=1.25, tracker=tracker)["track"] is None
+def test_the_track_is_lost_without_detection():
+    registry, _, tracker = confirmed_track()
+    assert fuse(registry, now=0.75, tracker=tracker)["track"] is not None
+    assert fuse(registry, now=1.75, tracker=tracker)["track"] is None
 
 
 def simulate(noise, seconds=60.0, period=0.25):
@@ -225,9 +233,8 @@ def test_with_noisy_distances_the_track_is_closer_to_the_drone_than_the_raw_zone
 
 
 def test_fusing_again_without_new_detection_changes_nothing():
-    registry, sessions = registry_and_sessions("noe", "tristan", "maxence")
-    tracker = new_tracker()
-    fuse(registry, now=0.0, tracker=tracker)
-    detect(sessions, PHONES, now=0.25)
-    first = fuse(registry, now=0.5, tracker=tracker)["track"]
-    assert fuse(registry, now=0.5, tracker=tracker)["track"] == first
+    registry, sessions, tracker = confirmed_track()
+    detect(sessions, PHONES, now=0.75)
+    first = fuse(registry, now=1.0, tracker=tracker)["track"]
+    assert first is not None
+    assert fuse(registry, now=1.0, tracker=tracker)["track"] == first
