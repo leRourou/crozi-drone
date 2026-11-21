@@ -66,7 +66,12 @@ def dominant_frequency(path: Path) -> float:
 def stack(tmp_path):
     api_port, web_port = free_port(), free_port()
     recordings = tmp_path / "recordings"
-    env_api = {"SAVE_SESSIONS": "1", "RECORDINGS_DIR": str(recordings), "PATH": os.environ["PATH"]}
+    env_api = {
+        "SAVE_SESSIONS": "1",
+        "RECORDINGS_DIR": str(recordings),
+        "DISTANCE_ESTIMATOR": "scripted",
+        "PATH": os.environ["PATH"],
+    }
     env_web = {"CROZIDRONE_BACKEND": f"http://127.0.0.1:{api_port}", "PATH": os.environ["PATH"]}
     api_log = (tmp_path / "server.log").open("w")
     api = subprocess.Popen(
@@ -101,18 +106,49 @@ def stack(tmp_path):
         api_log.close()
 
 
-def test_fake_microphone_reaches_the_server_bit_exact(stack, tmp_path):
+def launch_with_fake_mic(pw, tmp_path):
     tone = tmp_path / "tone440.wav"
     write_tone(tone)
+    return pw.chromium.launch(
+        args=[
+            "--use-fake-device-for-media-stream",
+            "--use-fake-ui-for-media-stream",
+            f"--use-file-for-fake-audio-capture={tone}",
+            "--autoplay-policy=no-user-gesture-required",
+        ]
+    )
+
+
+def start_capture(page, url, label):
+    page.goto(url)
+    page.get_by_label("Téléphone", exact=True).select_option(label=label)
+    page.get_by_role("button", name="Continuer").click()
+    page.get_by_role("button", name="Démarrer").click()
+
+
+def test_the_state_page_shows_the_capturing_phone_and_its_simulated_distance(stack, tmp_path):
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(
-            args=[
-                "--use-fake-device-for-media-stream",
-                "--use-fake-ui-for-media-stream",
-                f"--use-file-for-fake-audio-capture={tone}",
-                "--autoplay-policy=no-user-gesture-required",
-            ]
-        )
+        browser = launch_with_fake_mic(pw, tmp_path)
+        display = browser.new_page()
+        display.goto(stack["url"] + "display.html")
+        noe = display.locator('[data-profile="noe"]')
+        noe.and_(display.locator('[data-status="never_seen"]')).wait_for(timeout=10_000)
+        display.get_by_text("Estimateur simulé").wait_for()
+
+        phone = browser.new_page()
+        start_capture(phone, stack["url"], "Téléphone de Noé")
+        noe.and_(display.locator('[data-status="streaming"]')).wait_for(timeout=15_000)
+        detection = noe.locator(".detection")
+        detection.filter(has_text=re.compile("Drone à|Aucun drone")).wait_for(timeout=5_000)
+        statuses = display.locator(".phone").evaluate_all("els => els.map(e => e.dataset.status)")
+        browser.close()
+
+    assert statuses == ["streaming", "never_seen", "never_seen"], statuses
+
+
+def test_fake_microphone_reaches_the_server_bit_exact(stack, tmp_path):
+    with sync_playwright() as pw:
+        browser = launch_with_fake_mic(pw, tmp_path)
         page = browser.new_page()
         page.goto(stack["url"])
         page.get_by_text("Détails").click()  # journal replié par défaut

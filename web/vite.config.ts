@@ -16,6 +16,15 @@ export default defineConfig({
     // Contrats partagés avec le serveur (profils…), importés au build depuis la racine du dépôt.
     alias: { "@edth/capture": sharedModule, "@contracts": contracts },
   },
+  build: {
+    // Deux pages : index.html (téléphone, captation) et display.html (état général, PC).
+    rollupOptions: {
+      input: {
+        capture: fileURLToPath(new URL("index.html", import.meta.url)),
+        display: fileURLToPath(new URL("display.html", import.meta.url)),
+      },
+    },
+  },
   server: {
     fs: { allow: [repoRoot] },
     allowedHosts: [".ngrok-free.app", ".ngrok.app", ".ts.net", ...extraHosts],
