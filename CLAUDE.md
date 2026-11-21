@@ -23,14 +23,24 @@ Contrat de capture : `docs/audio-capture-contract.md`. Protocole : `docs/protoco
 ```bash
 # serveur
 cd server && uv sync && uv run ruff check && uv run pytest
-cd server && uv run uvicorn app.main:app --port 8000          # SAVE_SESSIONS=1 pour écrire recordings/
-# front
+cd server && SAVE_SESSIONS=1 uv run uvicorn app.main:app --port 8000   # écrit recordings/
+# front (HTTPS fourni par ngrok / Tailscale Serve devant le port Vite)
 cd front && npm install && npm test && npm run build
-cd front && npm run dev                                      # https? non : HTTPS fourni par ngrok/Tailscale
-# e2e (lance serveur + vite)
-uv run --with playwright --with pytest --with numpy pytest e2e -q
+cd front && npm run dev
+# e2e (lance uvicorn + vite, Chromium faux micro 440 Hz), depuis la racine
+uv run --no-project --with playwright --with pytest --with numpy pytest e2e -q
 ```
 
+## Repères
+- Serveur : `server/app/protocol.py` (validation à la frontière), `session.py` (seq + SHA),
+  `stats.py` (diagnostic), `main.py` (endpoint, logs `event=… clé=valeur`).
+- Front : `front/src/packetizer.ts`, `streamer.ts` (session, relance après limite), `App.tsx` (UI).
+- Lot 2 non fait : `network_too_slow`, reconnexion avec délai croissant, Wake Lock.
+
 ## Qualité
-`~/tools/crapper/crapper --changed`, `~/tools/dryer/dryer`, `~/tools/mutator/mutator --changed`
-(composants UI purs exclus). `vendor/` est ignoré par ces outils.
+`~/tools/crapper/crapper`, `~/tools/dryer/dryer`, `~/tools/mutator/mutator` (composants UI purs
+exclus : `App.tsx`, `main.tsx`). `vendor/` est ignoré par ces outils.
+- Python : générer `server/target/coverage/python/lcov.info` (`coverage run -m pytest` puis
+  `coverage lcov`) avant `crapper --use-existing-coverage app`.
+- TS : `npm run coverage` puis `crapper --use-existing-coverage src/<fichier>.ts` ;
+  mutator : `--test-command "npx vitest run"`.
