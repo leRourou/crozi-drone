@@ -126,24 +126,32 @@ def start_capture(page, url, label):
     page.get_by_role("button", name="Démarrer").click()
 
 
-def test_the_state_page_shows_the_capturing_phone_and_its_simulated_distance(stack, tmp_path):
+def test_the_room_map_shows_the_listening_phone_and_its_simulated_distance(stack, tmp_path):
     with sync_playwright() as pw:
         browser = launch_with_fake_mic(pw, tmp_path)
         display = browser.new_page()
         display.goto(stack["url"] + "display.html")
-        noe = display.locator('[data-profile="noe"]')
-        noe.and_(display.locator('[data-status="never_seen"]')).wait_for(timeout=10_000)
+        noe_item = display.locator('.phone-item[data-profile="noe"]')
+        noe_item.and_(display.locator('[data-status="never_seen"]')).wait_for(timeout=10_000)
         display.get_by_text("Estimateur simulé").wait_for()
 
         phone = browser.new_page()
         start_capture(phone, stack["url"], "Téléphone de Noé")
-        noe.and_(display.locator('[data-status="streaming"]')).wait_for(timeout=15_000)
-        detection = noe.locator(".detection")
+        # Indicateur d'écoute sur le plan, état et distance simulée dans le panneau.
+        display.locator('.phone-marker[data-profile="noe"][data-listening="on"]').wait_for(timeout=15_000)
+        noe_item.and_(display.locator('[data-status="streaming"]')).wait_for()
+        detection = noe_item.locator(".detection")
         detection.filter(has_text=re.compile("Drone à|Aucun drone")).wait_for(timeout=5_000)
-        statuses = display.locator(".phone").evaluate_all("els => els.map(e => e.dataset.status)")
+        listening = display.locator(".phone-marker").evaluate_all(
+            "els => els.map(e => e.dataset.listening)"
+        )
+        # Un clic sur le téléphone du plan ouvre son détail.
+        display.locator('.phone-marker[data-profile="noe"]').click(force=True)
+        details = display.get_by_label("Détails : Téléphone de Noé")
+        details.get_by_text("À l'écoute").wait_for()
         browser.close()
 
-    assert statuses == ["streaming", "never_seen", "never_seen"], statuses
+    assert listening == ["on", "never", "never"], listening
 
 
 def test_fake_microphone_reaches_the_server_bit_exact(stack, tmp_path):
