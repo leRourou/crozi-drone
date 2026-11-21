@@ -2,7 +2,7 @@
 
 Chaîne : téléphone (navigateur) → micro via le module partagé → WebSocket binaire → FastAPI.
 Périmètre actuel : captation + logs de preuve, état général des téléphones (`/ws/state`, page `display.html`),
-② simulé (trajectoire scriptée) en attendant le modèle, ③ branché (`fusion.py`) ; la page d'état est le plan
+② simulé (trajectoire scriptée) ou vrai modèle (release du repo ML), ③ branché (`fusion.py`) ; la page d'état est le plan
 de la salle de démo (téléphones, cercles de distance, drone).
 Hors périmètre : iPhone / Safari. Le profil WebKit reste accepté tel quel (module partagé) mais n'est pas validé.
 
@@ -29,6 +29,11 @@ Contrat de capture : `docs/audio-capture-contract.md`. Protocole : `docs/protoco
 uv sync --all-packages && uv run ruff check && uv run pytest
 SAVE_SESSIONS=1 uv run uvicorn api.main:app --port 8000     # écrit ./recordings/
 DISTANCE_ESTIMATOR=scripted uv run uvicorn api.main:app --port 8000  # drone virtuel (défaut : none)
+# vrai modèle : release HF épinglée (HF_TOKEN dans l'environnement), ou DISTANCE_MODEL_DIR=<bundle local>
+DISTANCE_ESTIMATOR=model DISTANCE_MODEL_REPO=ImAPancake/EDTH_ml_models \
+  DISTANCE_MODEL_REVISION=d53eabe9b743431cd5edbcc96233054c1f693d65 \
+  DISTANCE_MODEL_RELEASE=edth.audio.24k-1s.r0 uv run uvicorn api.main:app --port 8000
+uv run python -m api.model_fetch   # mêmes variables : tire la release dans le cache HF (déploiement)
 # réglages temps réel (ms) : DISTANCE_WINDOW_MS=250 STATE_PERIOD_MS=250 STALE_AFTER_MS=1000
 # DETECTION_FRESH_MS=2000 — lus et validés par services/api/settings.py (docs/protocol.md)
 # front (HTTPS fourni par ngrok / Tailscale Serve devant le port Vite)
@@ -47,11 +52,17 @@ packages/audio-capture/   ① récupération du son : protocol.py (validation à
                              session.py (seq + SHA), stats.py (diagnostic), recording.py
 packages/distance-estimation/ ② son → distance : estimator.py (interface AudioWindow → DistanceEstimate,
                              range None = pas de drone), windows.py (fenêtres contiguës d'une session),
-                             scripted.py (mock : drone virtuel sur un cercle, vraie distance)
+                             scripted.py (mock : drone virtuel sur un cercle, vraie distance),
+                             release.py (bundle edth.model-release.v1 : manifeste, code figé, pickles,
+                             parité rejouée au chargement), stream.py (chemin live : décimation continue,
+                             fenêtres glissantes, QC zéros sur le 48 kHz), model.py (ModelEstimator)
+packages/features/        copie figée de dsp.py / ml.py de la release (modules top-level `dsp`, `ml` :
+                             les pickles référencent `ml`) ; test SHA-256, PROVENANCE.md ; torch CPU
 services/api/             main.py (/ws/audio, /ws/state, create_app, make_estimation, logs `event=… clé=valeur`),
                              settings.py (seul lecteur des variables d'environnement du temps réel),
                              state.py (PhoneRegistry : état par téléphone, la session la plus récente gagne),
                              fusion.py (③ : sélection des détections, localiser_drone en thread, piste `Tracker`, tâche de fond),
+                             model_fetch.py (bundle du modèle : DISTANCE_MODEL_DIR ou snapshot HF épinglé),
                              logfmt.py, profiles.py (charge et valide contracts/profiles.json au démarrage)
 contracts/profiles.json   seule source des téléphones (id, libellé, position x ; y ; z en mètres) pour Python et TS
 web/src/capture/          ① page téléphone : packetizer.ts, streamer.ts (session, relance, reconnexion),
@@ -67,12 +78,12 @@ packages/localization/    ③ distances → position : calculation.py `localiser
                              fins de ligne CRLF conservées.
                              tracking.py `SuiviDrone` : EKF sur les distances (piste `track`, lissage),
                              démarré sur la zone de `localiser_drone`, altitude tirée vers TRACK_ALTITUDE_M.
-conftest.py               helpers de test partagés (make_hello, sine, packet, TEAM_PROFILES lu du contrat)
+conftest.py               helpers de test partagés (make_hello, sine, packet, TEAM_PROFILES lu du contrat,
+                             write_model_bundle : bundle de release de test au format r0)
 ```
-À venir (ne pas créer avant d'en avoir le code) : `packages/features` (prétraitement commun
-entraînement ↔ inférence), vrai modèle de ② (même interface que `scripted.py`),
-`ml/`.
-Règle : un module n'importe jamais un autre module ; seul `services/api` les assemble.
+À venir (ne pas créer avant d'en avoir le code) : `ml/`.
+Règle : un module n'importe jamais un autre module ; seul `services/api` les assemble. `packages/features`
+n'est pas un module ①–④ mais une bibliothèque figée (comme numpy), importée par distance-estimation.
 
 - Lot 2 fait : `network_too_slow`, reconnexion avec délai croissant (`docs/protocol.md`), Wake Lock.
 - Lot 3 fait : z = 0 dans le contrat, mock de ② (`DISTANCE_ESTIMATOR=scripted`), `/ws/state` + page d'état,
@@ -81,10 +92,15 @@ Règle : un module n'importe jamais un autre module ; seul `services/api` les as
   Les WAV `SAVE_SESSIONS=1` restent une option de preuve, désactivée par défaut.
 - Lot 4 fait : drone simulé à l'échelle de la salle (`SCRIPTED_*`), ③ branché (`drone` dans `/ws/state`),
   plan de salle cliquable. Pas de `packages/bus` : ③ ne combine que des détections à ≤ `FUSION_SPREAD_MS`.
+- Lot 5 fait : vrai modèle de ② (`DISTANCE_ESTIMATOR=model`, contrat d'intégration ML V1, release r0
+  validée de bout en bout) ; les mocks `none` / `scripted` restent. Nouvelle release : recopier son
+  `frozen/` dans `packages/features` (+ empreintes du test et PROVENANCE.md) si le code change, puis
+  changer `DISTANCE_MODEL_REVISION` / `DISTANCE_MODEL_RELEASE` ; le démarrage refuse toute incohérence.
 
 ## Qualité
 `~/tools/crapper/crapper`, `~/tools/dryer/dryer`, `~/tools/mutator/mutator` (composants UI purs
-exclus : `App.tsx`, `main.tsx`, `MapView.tsx`, `Panel.tsx`, `icons.tsx`). `vendor/` est ignoré par ces outils.
+exclus : `App.tsx`, `main.tsx`, `MapView.tsx`, `Panel.tsx`, `icons.tsx`). `vendor/` est ignoré par ces outils ;
+la copie figée `packages/features/src` est exclue (ruff aussi) : ne pas la corriger.
 - Python (depuis la racine) : `coverage run --source=packages,services -m pytest` puis
   `coverage lcov -o target/coverage/python/lcov.info`, avant
   `crapper --use-existing-coverage packages services`.

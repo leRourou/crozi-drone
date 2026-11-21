@@ -86,7 +86,7 @@ brutale), et deux onglets ouverts sur le même profil ne se relancent pas l'un l
 l'ordre de `contracts/profiles.json`. Les messages du client sont ignorés.
 
 ```json
-{ "type": "state", "server_time": <epoch s>, "estimator": "none|scripted", "drone": { … } | null,
+{ "type": "state", "server_time": <epoch s>, "estimator": "none|scripted|model", "drone": { … } | null,
   "phones": [
     { "profile": "noe", "label": "Téléphone de Noé", "position_m": {"x": 2.06, "y": 9.66, "z": 0},
       "status": "streaming|stale|offline|never_seen", "session_id": "…|null", "contract": "…|null",
@@ -105,18 +105,19 @@ l'ordre de `contracts/profiles.json`. Les messages du client sont ignorés.
 `rt_ratio` et `rms_dbfs` restent `null` jusqu'aux premières statistiques.
 
 `detection` vaut `null` sans estimateur (`estimator: "none"`) ou avant la première fenêtre complète
-(`DISTANCE_WINDOW_MS`, 250 ms par défaut : une estimation par fenêtre, fenêtres contiguës).
+(`scripted` : `DISTANCE_WINDOW_MS`, 250 ms par défaut, fenêtres contiguës ; `model` : une estimation par
+pas de la release, voir plus bas).
 Sinon : `{"drone": bool, "distance_m": float|null, "uncertainty_rel": float|null, "age_s": float,
 "fresh": bool}`. `distance_m` et `uncertainty_rel` ne sont présents que si `drone` est vrai.
 `fresh` est vrai si la détection a ≤ `DETECTION_FRESH_MS` (2 s par défaut).
 
-L'estimateur se choisit avec `DISTANCE_ESTIMATOR` : `none` par défaut, ou `scripted` (mock de ②, drone
-virtuel sur une trajectoire connue).
+L'estimateur se choisit avec `DISTANCE_ESTIMATOR` : `none` par défaut, `scripted` (mock de ②, drone
+virtuel sur une trajectoire connue) ou `model` (vrai modèle, release du repo ML).
 
 | Variable | Défaut | Rôle |
 | --- | --- | --- |
-| `DISTANCE_ESTIMATOR` | `none` | `none` ou `scripted` |
-| `DISTANCE_WINDOW_MS` | 250 | taille d'une fenêtre analysée par ② |
+| `DISTANCE_ESTIMATOR` | `none` | `none`, `scripted` ou `model` |
+| `DISTANCE_WINDOW_MS` | 250 | taille d'une fenêtre analysée par le mock (`model` : imposé par la release) |
 | `STATE_PERIOD_MS` | 250 | intervalle entre deux messages `state` |
 | `STALE_AFTER_MS` | 1000 | seuil `streaming` → `stale` |
 | `DETECTION_FRESH_MS` | 2000 | âge maximal d'une détection `fresh` |
@@ -132,11 +133,43 @@ virtuel sur une trajectoire connue).
 | `SCRIPTED_PERIOD_S` | 20 | durée d'un tour |
 | `SCRIPTED_RANGE_M` | 5 | portée de détection : au-delà, « pas de drone » |
 | `SCRIPTED_UNCERTAINTY` | 0.10 | incertitude relative annoncée avec chaque distance |
+| `DISTANCE_MODEL_REPO` | — | `model` : repo Hugging Face des releases (ex. `ImAPancake/EDTH_ml_models`) |
+| `DISTANCE_MODEL_REVISION` | — | `model` : sha de commit HF à 40 caractères, épinglé (jamais une branche) |
+| `DISTANCE_MODEL_RELEASE` | — | `model` : dossier de la release dans le repo (ex. `edth.audio.24k-1s.r0`) ; le manifeste doit porter ce nom |
+| `DISTANCE_MODEL_DIR` | — | `model` : bundle local (dev, hors ligne) ; prioritaire, les trois variables précédentes sont alors inutiles |
+| `MODEL_UNCERTAINTY` | 0.10 | `model` : incertitude relative annoncée avec chaque distance (le contrat ML la laisse à l'appli) |
+| `HF_TOKEN` | — | jeton Hugging Face (repo privé) ; jamais journalisé |
 | `SCRIPTED_NOISE` | 0 | écart-type relatif d'un bruit gaussien sur chaque distance (0 = exacte ; 0.05 ≈ 95 % des distances dans ± 10 %). La détection reste décidée sur la vraie distance. |
 
 Les durées `*_MS` sont des entiers strictement positifs en millisecondes ; les autres valeurs sont des
 réels (point décimal). Une valeur invalide empêche le serveur
 de démarrer (message d'erreur nommant la variable).
+### Vrai modèle : `DISTANCE_ESTIMATOR=model`
+
+Contrat d'intégration ML V1 (Outline « Contrat d'intégration ML V1 — bundle de release, manifeste et
+inférence live »). Une release est un dossier : `manifest.json` (`edth.model-release.v1`), `frozen/dsp.py`
+et `frozen/ml.py`, `detection/` et `distance/model.joblib`, `parity/fixture.json`.
+
+- **Chargement au démarrage** : `DISTANCE_MODEL_DIR`, sinon téléchargement du seul dossier
+  `DISTANCE_MODEL_RELEASE` du repo à la révision épinglée (cache `HF_HOME`). Pour tirer la release au
+  déploiement plutôt qu'au premier démarrage : `python -m api.model_fetch` (mêmes variables).
+- **Refus, jamais de repli sur le mock** : contrat inconnu, transport autre que 48 kHz mono s16le, taux
+  inconnu de `dsp.py`, empreinte FIR différente, fenêtres qui ne finissent pas sur le pas, seuil hors
+  ]0, 1[, `frozen/*.py` différents de `packages/features` (vérifié avant de charger les pickles), dossier
+  qui contient une autre release, lot de parité non reproduit. Le serveur ne démarre pas et l'erreur nomme
+  la cause (log `event=model_loaded release=… source=… revision=…` en cas de succès).
+- **Parité** : chaque cas du lot (une session : amorce 500 ms + une fenêtre) est rejoué par le chemin
+  live et doit redonner la fenêtre décimée à l'octet près, les features et le logmel à 1e-9, le score à
+  1e-6 et la même présence (la distance n'est comparée que si le drone est présent).
+- **Chemin live** (par session, état neuf à chaque session) : décimation continue (état FIR conservé),
+  fenêtres glissantes sur le flux décimé (r0 : 1 s, pas de 250 ms), contrôle qualité sur le flux 48 kHz
+  (suite de zéros exacts ≥ 40 ms → fenêtres touchées et garde de 500 ms exclues). Chaque bloc reçu d'un
+  pas donne une `detection` : fenêtre non analysable (amorce, coupure) ou score < seuil → `drone: false` ;
+  sinon `distance_m` (bornée par le modèle à [1, 5] m) et `MODEL_UNCERTAINTY`. Motif d'une fenêtre non
+  analysable journalisé à chaque changement (`event=model_window_skipped profile=… reason=warmup|dropout`).
+- **Écart causal connu** : une suite de zéros encore trop courte à la fin d'une fenêtre ne l'invalide pas,
+  alors que hors ligne elle est vue en entier.
+
 ### `drone` : résultat de ③
 
 `null` sans estimateur ou avant le premier calcul. Sinon, recalculé toutes les `STATE_PERIOD_MS` :
