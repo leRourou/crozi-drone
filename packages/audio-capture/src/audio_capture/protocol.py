@@ -13,8 +13,6 @@ from typing import Any, Literal, get_args
 
 PROTOCOL = "crozidrone.audio-stream.v1"
 KNOWN_CONTRACTS = frozenset({"edth.web-pcm.v1", "edth.web-pcm.webkit.v1"})
-# Téléphones de l'équipe ; même liste dans web/src/capture/profiles.ts (réf. docs/protocol.md).
-KNOWN_PROFILES = frozenset({"axel", "maxence", "tristan", "noe", "charlene"})
 SAMPLE_RATE = 48_000
 SEQ_BYTES = 4
 SAMPLE_BYTES = 2
@@ -97,8 +95,8 @@ def _parse_uuid(value: Any) -> uuid.UUID:
         raise ProtocolError("invalid_hello", f"session_id is not a UUID: {value!r}") from exc
 
 
-def _check_profile(value: Any) -> str:
-    if not isinstance(value, str) or value not in KNOWN_PROFILES:
+def _check_profile(value: Any, known_profiles: frozenset[str]) -> str:
+    if not isinstance(value, str) or value not in known_profiles:
         raise ProtocolError("unknown_profile", f"profile={value!r}")
     return value
 
@@ -116,14 +114,15 @@ def _check_settings(settings: Any) -> str:
     return contract
 
 
-def parse_hello(text: str) -> Hello:
+def parse_hello(text: str, known_profiles: frozenset[str]) -> Hello:
+    """known_profiles : identifiants de contracts/profiles.json, fournis par services/api."""
     obj = _load_object(text, "invalid_hello")
     if obj.get("type") != "hello":
         raise ProtocolError("invalid_hello", "first message must be hello")
     if obj.get("protocol") != PROTOCOL:
         raise ProtocolError("unknown_protocol", f"protocol={obj.get('protocol')!r}")
     session_id = _parse_uuid(obj.get("session_id"))
-    profile = _check_profile(obj.get("profile"))
+    profile = _check_profile(obj.get("profile"), known_profiles)
     settings = obj.get("capture_settings")
     contract = _check_settings(settings)
     return Hello(

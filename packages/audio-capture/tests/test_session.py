@@ -6,11 +6,11 @@ import pytest
 
 from audio_capture.protocol import End, Packet, ProtocolError, parse_hello
 from audio_capture.session import StreamSession
-from conftest import make_hello, sine
+from conftest import TEAM_PROFILES, make_hello, sine
 
 
 def session(**kw):
-    return StreamSession(parse_hello(json.dumps(make_hello())), started_at=0.0, **kw)
+    return StreamSession(parse_hello(json.dumps(make_hello()), TEAM_PROFILES), started_at=0.0, **kw)
 
 
 def packets(samples, size=2400):

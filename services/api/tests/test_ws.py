@@ -63,12 +63,12 @@ def test_full_session_ends_with_matching_ack(client, caplog):
         "frames_received": len(samples),
         "pcm_sha256": digest,
         "match": True,
-        "profile": "axel",
+        "profile": "tristan",
     }
     sid = hello["session_id"][:8]
-    assert f"event=session_start sid={sid} profile=axel contract=edth.web-pcm.v1" in caplog.text
+    assert f"event=session_start sid={sid} profile=tristan contract=edth.web-pcm.v1" in caplog.text
     [end] = [r.message for r in caplog.records if "event=session_end" in r.message]
-    assert f"sid={sid} profile=axel" in end
+    assert f"sid={sid} profile=tristan" in end
     assert "match=✅" in caplog.text and "reason=manual" in caplog.text
 
 
@@ -157,7 +157,7 @@ def test_saved_session_wav_matches_received_bytes(client, tmp_path, monkeypatch)
             )
         )
         receive_until(ws, "end_ack")
-    with wave.open(str(tmp_path / f"axel_{hello['session_id']}.wav"), "rb") as wav:
+    with wave.open(str(tmp_path / f"tristan_{hello['session_id']}.wav"), "rb") as wav:
         assert wav.readframes(wav.getnframes()) == samples.tobytes()
 
 

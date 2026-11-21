@@ -14,16 +14,17 @@ Transport temps réel du PCM produit par le module partagé `vendor/edth/audio_c
 ### `hello` (texte, premier message obligatoire)
 ```json
 { "type": "hello", "protocol": "crozidrone.audio-stream.v1", "session_id": "<uuid v4>",
-  "profile": "axel|maxence|tristan|noe|charlene",
+  "profile": "noe|tristan|maxence",
   "capture_settings": { "…": "captureSettings renvoyé par start(), intégral" },
   "captured_at": "<ISO UTC>", "user_agent": "…" }
 ```
 
 `profile` : téléphone de l'équipe choisi sur la page avant d'enregistrer (obligatoire, non mémorisé).
-Identifiants ASCII stables. Les libellés affichés sont « Téléphone d'Axel », « … de Maxence », « … de Tristan »,
-« … de Noé » et « … de Charlène ». **Ce document est la référence** de la liste, dupliquée dans
-`web/src/capture/profiles.ts` et `KNOWN_PROFILES` (`audio_capture/protocol.py`). Une relance après la
-limite du module garde le profil.
+Identifiants ASCII stables (`[a-z0-9_]+`). **Référence unique : `contracts/profiles.json`**
+(identifiant, libellé affiché, position du téléphone `position_m` en mètres, repère local x ; y).
+Le front l'importe au build (`web/src/shared/profiles.ts`) ; `services/api` le valide au démarrage
+(chemin modifiable par `PROFILES_FILE`) et transmet les identifiants à `parse_hello`. Une relance après
+la limite du module garde le profil.
 
 ### Paquets audio (binaire)
 `[seq : uint32 LE][échantillons Int16 LE]`

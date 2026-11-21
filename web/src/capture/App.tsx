@@ -2,7 +2,7 @@ import { createPcmCapture, getCaptureSupport, WEBKIT_CAPTURE_CONTRACT } from "@e
 import { type FormEvent, type RefObject, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { appendLog, clock, type LogLine } from "./logbuffer";
 import { isLittleEndian } from "./packetizer";
-import { findProfile, PROFILES, type Profile } from "./profiles";
+import { findProfile, PROFILES, type Profile } from "../shared/profiles";
 import { type LogLevel, type Status, Streamer, subtleSha256Hex } from "./streamer";
 import { ScreenWakeLock } from "./wakelock";
 

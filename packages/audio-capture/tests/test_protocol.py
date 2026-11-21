@@ -10,7 +10,7 @@ from audio_capture.protocol import (
     parse_hello,
     parse_packet,
 )
-from conftest import make_hello
+from conftest import TEAM_PROFILES, make_hello
 
 
 def raw(obj):
@@ -18,16 +18,16 @@ def raw(obj):
 
 
 def test_valid_strict_hello_is_parsed(hello):
-    parsed = parse_hello(raw(hello))
+    parsed = parse_hello(raw(hello), TEAM_PROFILES)
     assert str(parsed.session_id) == hello["session_id"]
     assert parsed.contract == "edth.web-pcm.v1"
     assert parsed.capture_settings == hello["capture_settings"]
-    assert parsed.profile == "axel"
+    assert parsed.profile == "tristan"
 
 
-@pytest.mark.parametrize("profile", ["axel", "maxence", "tristan", "noe", "charlene"])
+@pytest.mark.parametrize("profile", ["noe", "tristan", "maxence"])
 def test_each_team_phone_profile_is_accepted(profile):
-    assert parse_hello(raw(make_hello(profile=profile))).profile == profile
+    assert parse_hello(raw(make_hello(profile=profile)), TEAM_PROFILES).profile == profile
 
 
 def test_webkit_profile_is_accepted():
@@ -38,14 +38,14 @@ def test_webkit_profile_is_accepted():
             "input_channels": None,
         }
     )
-    assert parse_hello(raw(hello)).contract == "edth.web-pcm.webkit.v1"
+    assert parse_hello(raw(hello), TEAM_PROFILES).contract == "edth.web-pcm.webkit.v1"
 
 
 def test_hello_without_profile_is_refused():
     hello = make_hello()
     del hello["profile"]
     with pytest.raises(ProtocolError) as err:
-        parse_hello(raw(hello))
+        parse_hello(raw(hello), TEAM_PROFILES)
     assert err.value.code == "unknown_profile"
 
 
@@ -67,20 +67,22 @@ def test_hello_without_profile_is_refused():
         ({"profile": "bob"}, "unknown_profile"),
         ({"profile": None}, "unknown_profile"),
         ({"profile": 1}, "unknown_profile"),
-        ({"profile": "Axel"}, "unknown_profile"),
-        ({"profile": ["axel"]}, "unknown_profile"),
+        ({"profile": "Tristan"}, "unknown_profile"),
+        ({"profile": ["tristan"]}, "unknown_profile"),
+        ({"profile": "axel"}, "unknown_profile"),
+        ({"profile": "charlene"}, "unknown_profile"),
     ],
 )
 def test_invalid_hello_is_refused(overrides, code):
     with pytest.raises(ProtocolError) as err:
-        parse_hello(raw(make_hello(**overrides)))
+        parse_hello(raw(make_hello(**overrides)), TEAM_PROFILES)
     assert err.value.code == code
 
 
 @pytest.mark.parametrize("text", ["not json", "[]", "null"])
 def test_non_object_hello_is_refused(text):
     with pytest.raises(ProtocolError) as err:
-        parse_hello(text)
+        parse_hello(text, TEAM_PROFILES)
     assert err.value.code == "invalid_hello"
 
 

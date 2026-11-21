@@ -13,7 +13,7 @@ import type {
 } from "@edth/capture";
 import { WEBKIT_CAPTURE_CONTRACT } from "@edth/capture";
 import { Packetizer } from "./packetizer";
-import type { ProfileId } from "./profiles";
+import type { ProfileId } from "../shared/profiles";
 
 export const PROTOCOL = "crozidrone.audio-stream.v1";
 const WAV_HEADER_BYTES = 44;

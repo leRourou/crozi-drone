@@ -8,7 +8,7 @@ import pytest
 
 from api import main
 from api.main import Connection
-from conftest import make_hello, packet
+from conftest import TEAM_PROFILES, make_hello, packet
 
 
 class FakeWebSocket:
@@ -53,7 +53,7 @@ def fast_stats(monkeypatch):
 
 def run(ws, settle=0.1):
     async def scenario():
-        await asyncio.wait_for(Connection(ws).run(), timeout=1.0)
+        await asyncio.wait_for(Connection(ws, TEAM_PROFILES).run(), timeout=1.0)
         await asyncio.sleep(settle)  # laisse une éventuelle boucle fantôme se manifester
 
     asyncio.run(scenario())
@@ -89,7 +89,7 @@ def test_stats_are_sent_while_idle():
     ws = FakeWebSocket([text(make_hello())])
 
     async def scenario():
-        task = asyncio.create_task(Connection(ws).run())
+        task = asyncio.create_task(Connection(ws, TEAM_PROFILES).run())
         await asyncio.sleep(0.07)
         await ws.incoming.put(DISCONNECT)
         await asyncio.wait_for(task, timeout=1.0)

@@ -39,15 +39,17 @@ Arborescence : un package Python par module, assemblés par `services/api`.
 ```
 packages/audio-capture/   ① récupération du son : protocol.py (validation à la frontière),
                              session.py (seq + SHA), stats.py (diagnostic), recording.py
-services/api/             main.py (endpoint /ws/audio, create_app, logs `event=… clé=valeur`), logfmt.py
+services/api/             main.py (endpoint /ws/audio, create_app, logs `event=… clé=valeur`), logfmt.py,
+                             profiles.py (charge et valide contracts/profiles.json au démarrage)
+contracts/profiles.json   seule source des téléphones (id, libellé, position en mètres) pour Python et TS
 web/src/capture/          ① page téléphone : packetizer.ts, streamer.ts (session, relance, reconnexion),
                              wakelock.ts (écran allumé), App.tsx (UI)
-web/src/shared/           edth-capture.d.ts (types du module partagé)
-conftest.py               helpers de test partagés (make_hello, sine, packet)
+web/src/shared/           edth-capture.d.ts (types du module partagé), profiles.ts (contrat, alias `@contracts`)
+conftest.py               helpers de test partagés (make_hello, sine, packet, TEAM_PROFILES lu du contrat)
 ```
 À venir (ne pas créer avant d'en avoir le code) : `packages/features` (prétraitement commun
 entraînement ↔ inférence), `packages/distance-estimation` (② son → distance),
-`packages/localization` (③ distances → position), `packages/bus`, `contracts/`, `ml/`,
+`packages/localization` (③ distances → position), `packages/bus`, `ml/`,
 `web/src/display/` (④ affichage des sources sonores + position du drone).
 Règle : un module n'importe jamais un autre module ; seul `services/api` les assemble.
 

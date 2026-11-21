@@ -50,7 +50,7 @@ async function connect(env: ReturnType<typeof setup>, index = 0, contract = "edt
   env.captures[index].grant(contract as "edth.web-pcm.v1");
   env.sockets[index].open();
   await tick();
-  env.sockets[index].receive({ type: "ready", session_id: "x", server_time: 1, profile: "axel" });
+  env.sockets[index].receive({ type: "ready", session_id: "x", server_time: 1, profile: "tristan" });
 }
 
 function sha(bytes: Uint8Array) {
@@ -63,7 +63,7 @@ afterEach(() => vi.useRealTimers());
 describe("Streamer", () => {
   it("starts the capture synchronously, inside the user gesture", () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     expect(env.captures).toHaveLength(1);
     expect(env.sockets[0].url).toBe("wss://phone.test/ws/audio");
     expect(env.sockets[0].binaryType).toBe("arraybuffer");
@@ -97,7 +97,7 @@ describe("Streamer", () => {
 
   it("manual stop flushes, sends end with the WAV data hash and closes on end_ack", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     env.captures[0].chunk(Int16Array.from({ length: 3000 }, (_, i) => i - 1500));
     env.streamer.stop();
@@ -110,29 +110,29 @@ describe("Streamer", () => {
       pcm_sha256: sha(env.captures[0].pcmBytes()),
     });
     expect(env.sockets[0].binaries()).toHaveLength(2);
-    env.sockets[0].receive({ type: "end_ack", frames_received: 3000, pcm_sha256: "ab", match: true, profile: "axel" });
+    env.sockets[0].receive({ type: "end_ack", frames_received: 3000, pcm_sha256: "ab", match: true, profile: "tristan" });
     expect(env.sockets[0].closed).toBe(true);
-    expect(env.logText()).toContain("end_ack frames=3000 match=✅ profile=axel");
+    expect(env.logText()).toContain("end_ack frames=3000 match=✅ profile=tristan");
     expect(env.statuses.at(-1)).toMatchObject({ state: "idle" });
     expect(env.captures).toHaveLength(1);
   });
 
   it("restarts a new capture and session automatically after the module limit", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     env.captures[0].chunk(new Int16Array(128));
     await env.captures[0].stop("limit");
     await tick();
     expect(env.sockets[0].texts().at(-1)).toMatchObject({ type: "end", reason: "limit" });
-    env.sockets[0].receive({ type: "end_ack", frames_received: 128, pcm_sha256: "x", match: true, profile: "axel" });
+    env.sockets[0].receive({ type: "end_ack", frames_received: 128, pcm_sha256: "x", match: true, profile: "tristan" });
     expect(env.captures).toHaveLength(2);
     expect(env.logText()).toMatch(/limit.*nouvelle session/);
     env.clock.now = 1250;
     await connect(env, 1);
     expect(env.sockets[1].texts()[0]).toMatchObject({
       session_id: "00000000-0000-4000-8000-000000000001",
-      profile: "axel",
+      profile: "tristan",
     });
     const granted = env.logs.filter((l) => l.text.startsWith("micro ok")).map((l) => l.text);
     expect(granted[0]).not.toContain("gap_ms");
@@ -141,7 +141,7 @@ describe("Streamer", () => {
 
   it("stops cleanly with network_too_slow once more than 5 s of audio waits in the socket", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     env.sockets[0].bufferedAmount = 480_000; // exactement 5 s : toléré
     env.captures[0].chunk(new Int16Array(2400));
@@ -164,7 +164,7 @@ describe("Streamer", () => {
 
   it("a module error ends the session explicitly, without hash and without restart", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     env.captures[0].chunk(new Int16Array(100));
     env.captures[0].fail("audio-interrupted");
@@ -178,7 +178,7 @@ describe("Streamer", () => {
 
   it("a refused microphone is logged with its code and closes the socket", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     env.captures[0].deny("permission-denied");
     await tick();
     expect(env.logText()).toContain("permission-denied");
@@ -188,12 +188,12 @@ describe("Streamer", () => {
 
   it("an unexpected socket close stops the capture and reconnects a new session after 1 s", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     env.sockets[0].drop(1006);
     expect(env.captures[0].disposed).toBe(true);
     expect(env.logText()).toContain("ws_closed code=1006");
-    expect(env.statuses.at(-1)).toEqual({ state: "reconnecting", profile: "axel" });
+    expect(env.statuses.at(-1)).toEqual({ state: "reconnecting", profile: "tristan" });
     expect(env.logs).toContainEqual({ text: "reconnexion dans 1 s (tentative 1)", level: "warn" });
     await vi.advanceTimersByTimeAsync(999);
     expect(env.captures).toHaveLength(1);
@@ -204,7 +204,7 @@ describe("Streamer", () => {
     await connect(env, 1);
     expect(env.sockets[1].texts()[0]).toMatchObject({
       session_id: "00000000-0000-4000-8000-000000000001",
-      profile: "axel",
+      profile: "tristan",
     });
     expect(env.logText()).toMatch(/ gap_ms=1100$/m); // trou réel : depuis la coupure
     expect(env.statuses.at(-1)).toMatchObject({ state: "streaming" });
@@ -212,7 +212,7 @@ describe("Streamer", () => {
 
   it("a socket that never opens disposes the capture", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     env.captures[0].grant();
     env.sockets[0].drop(1006);
     await tick();
@@ -222,7 +222,7 @@ describe("Streamer", () => {
 
   it("a server error is logged", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     env.sockets[0].receive({ type: "error", code: "discontinuity", message: "expected=1 got=2" });
     env.sockets[0].drop(1008);
@@ -231,7 +231,7 @@ describe("Streamer", () => {
 
   it("shows the WebKit warning when the module picks the WebKit profile", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env, 0, "edth.web-pcm.webkit.v1");
     expect(env.statuses.at(-1)).toMatchObject({ contract: "edth.web-pcm.webkit.v1", webkit: true });
     expect(env.logs).toContainEqual(expect.objectContaining({ level: "warn" }));
@@ -239,7 +239,7 @@ describe("Streamer", () => {
 
   it("pings every 2 s, logs tx counters and the round-trip time", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     await vi.advanceTimersByTimeAsync(2000);
     expect(env.sockets[0].texts().at(-1)).toEqual({ type: "ping", t: 1000 });
@@ -250,7 +250,7 @@ describe("Streamer", () => {
 
   it("logs server stats readably", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     env.sockets[0].receive({
       type: "stats", packets_per_s: 20, audio_s: 3.2, rt_ratio: 1.004, kbps: 768,
@@ -263,15 +263,15 @@ describe("Streamer", () => {
 
   it("refuses to start on a big-endian platform", () => {
     const env = setup({ littleEndian: false });
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     expect(env.captures).toHaveLength(0);
     expect(env.logs[0]).toMatchObject({ level: "error" });
   });
 
   it("ignores a second start while a session is active", async () => {
     const env = setup();
-    env.streamer.start("axel");
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
+    env.streamer.start("tristan");
     expect(env.captures).toHaveLength(1);
     await flush;
   });
@@ -298,17 +298,17 @@ describe("subtleSha256Hex", () => {
 describe("Streamer edge cases", () => {
   it("logs a mismatching end_ack as a warning", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     env.streamer.stop();
     await tick();
-    env.sockets[0].receive({ type: "end_ack", frames_received: 0, pcm_sha256: "x", match: false, profile: "axel" });
-    expect(env.logs).toContainEqual({ text: "end_ack frames=0 match=❌ profile=axel", level: "warn" });
+    env.sockets[0].receive({ type: "end_ack", frames_received: 0, pcm_sha256: "x", match: false, profile: "tristan" });
+    expect(env.logs).toContainEqual({ text: "end_ack frames=0 match=❌ profile=tristan", level: "warn" });
   });
 
   it("logs an error without code as unknown", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     env.captures[0].rejectWith(new Error("boom"));
     await tick();
     expect(env.logText()).toContain("code=unknown boom");
@@ -318,19 +318,19 @@ describe("Streamer edge cases", () => {
 describe("Streamer lifecycle", () => {
   it("logs the short session id when the microphone opens and when ready", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     expect(env.logText()).toContain("micro ok session=00000000 contract=edth.web-pcm.v1");
-    expect(env.logs).toContainEqual({ text: "ready session=00000000 profile=axel", level: "info" });
+    expect(env.logs).toContainEqual({ text: "ready session=00000000 profile=tristan", level: "info" });
   });
 
   it("stops pinging once the session is finished", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     env.streamer.stop();
     await tick();
-    env.sockets[0].receive({ type: "end_ack", frames_received: 0, pcm_sha256: "x", match: true, profile: "axel" });
+    env.sockets[0].receive({ type: "end_ack", frames_received: 0, pcm_sha256: "x", match: true, profile: "tristan" });
     const sentBefore = env.sockets[0].sent.length;
     await vi.advanceTimersByTimeAsync(5000);
     expect(env.sockets[0].sent.length).toBe(sentBefore);
@@ -338,30 +338,30 @@ describe("Streamer lifecycle", () => {
 
   it("can start again after a manual stop", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     env.streamer.stop();
     await tick();
-    env.sockets[0].receive({ type: "end_ack", frames_received: 0, pcm_sha256: "x", match: true, profile: "axel" });
-    env.streamer.start("axel");
+    env.sockets[0].receive({ type: "end_ack", frames_received: 0, pcm_sha256: "x", match: true, profile: "tristan" });
+    env.streamer.start("tristan");
     expect(env.captures).toHaveLength(2);
   });
 
   it("does not restart when the user stops while a limit stop is in flight", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     await env.captures[0].stop("limit");
     env.streamer.stop();
     await tick();
-    env.sockets[0].receive({ type: "end_ack", frames_received: 0, pcm_sha256: "x", match: true, profile: "axel" });
+    env.sockets[0].receive({ type: "end_ack", frames_received: 0, pcm_sha256: "x", match: true, profile: "tristan" });
     expect(env.captures).toHaveLength(1);
     expect(env.statuses.at(-1)).toMatchObject({ state: "idle" });
   });
 
   it("logs an error when the server echoes another profile in ready or end_ack", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     env.captures[0].grant();
     env.sockets[0].open();
     await tick();
@@ -371,8 +371,8 @@ describe("Streamer lifecycle", () => {
     env.sockets[0].receive({ type: "end_ack", frames_received: 0, pcm_sha256: "x", match: true });
     const errors = env.logs.filter((l) => l.level === "error").map((l) => l.text);
     expect(errors).toEqual([
-      "profil renvoyé par le serveur (noe) ≠ profil choisi (axel)",
-      "profil renvoyé par le serveur (undefined) ≠ profil choisi (axel)",
+      "profil renvoyé par le serveur (noe) ≠ profil choisi (tristan)",
+      "profil renvoyé par le serveur (undefined) ≠ profil choisi (tristan)",
     ]);
   });
 
@@ -392,7 +392,7 @@ async function failBeforeReady(env: ReturnType<typeof setup>, index: number) {
 describe("Streamer reconnection", () => {
   it("doubles the delay after each failed attempt, up to 30 s", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     const delays: number[] = [];
     for (let i = 0; i < 7; i++) {
       await failBeforeReady(env, i);
@@ -408,7 +408,7 @@ describe("Streamer reconnection", () => {
 
   it("resets the delay to 1 s once a session has reached ready", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await failBeforeReady(env, 0);
     await vi.advanceTimersByTimeAsync(1000);
     await failBeforeReady(env, 1);
@@ -421,14 +421,14 @@ describe("Streamer reconnection", () => {
 
   it("stop during the wait cancels the reconnection", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     env.sockets[0].drop(1006);
     env.streamer.stop();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(env.captures).toHaveLength(1);
     expect(env.statuses.at(-1)).toEqual({ state: "idle" });
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     expect(env.captures).toHaveLength(2);
     await failBeforeReady(env, 1);
     await vi.advanceTimersByTimeAsync(1000); // nouveau départ : délai repart de 1 s
@@ -437,7 +437,7 @@ describe("Streamer reconnection", () => {
 
   it("does not reconnect when the server refuses the session (close 1008)", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     env.sockets[0].receive({ type: "error", code: "unknown_profile", message: "x" });
     env.sockets[0].drop(1008);
@@ -448,12 +448,12 @@ describe("Streamer reconnection", () => {
 
   it("reconnects after a network_too_slow end_ack", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     env.sockets[0].bufferedAmount = 480_001;
     env.captures[0].chunk(new Int16Array(2400));
     await tick();
-    env.sockets[0].receive({ type: "end_ack", frames_received: 2400, pcm_sha256: "x", match: true, profile: "axel" });
+    env.sockets[0].receive({ type: "end_ack", frames_received: 2400, pcm_sha256: "x", match: true, profile: "tristan" });
     expect(env.statuses.at(-1)).toMatchObject({ state: "reconnecting" });
     await vi.advanceTimersByTimeAsync(1000);
     expect(env.captures).toHaveLength(2);
@@ -461,13 +461,13 @@ describe("Streamer reconnection", () => {
 
   it("a stop during a network_too_slow end leaves the phone idle, not reconnecting", async () => {
     const env = setup();
-    env.streamer.start("axel");
+    env.streamer.start("tristan");
     await connect(env);
     env.sockets[0].bufferedAmount = 480_001;
     env.captures[0].chunk(new Int16Array(2400));
     env.streamer.stop();
     await tick();
-    env.sockets[0].receive({ type: "end_ack", frames_received: 2400, pcm_sha256: "x", match: true, profile: "axel" });
+    env.sockets[0].receive({ type: "end_ack", frames_received: 2400, pcm_sha256: "x", match: true, profile: "tristan" });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(env.captures).toHaveLength(1);
     expect(env.statuses.at(-1)).toEqual({ state: "idle" });

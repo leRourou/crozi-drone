@@ -15,6 +15,7 @@ from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 
 from api.logfmt import kv, short_browser
+from api.profiles import Profile, load_profiles
 from audio_capture.protocol import (
     End,
     Hello,
@@ -107,8 +108,9 @@ def _match_label(client_sha: str | None, ack: EndAck | None) -> str:
 class Connection:
     """Une connexion WebSocket = une session. Un seul écrivain : la boucle run()."""
 
-    def __init__(self, ws: WebSocket) -> None:
+    def __init__(self, ws: WebSocket, known_profiles: frozenset[str]) -> None:
         self.ws = ws
+        self.known_profiles = known_profiles
         self.inbox: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.session: StreamSession | None = None
         self.recorder: WavRecorder | None = None
@@ -147,7 +149,7 @@ class Connection:
             return
         if first.get("text") is None:
             raise ProtocolError("invalid_hello", "first message must be a text hello")
-        self._open(parse_hello(first["text"]))
+        self._open(parse_hello(first["text"], self.known_profiles))
         await self.ws.send_json(
             {
                 "type": "ready",
@@ -229,12 +231,14 @@ class Connection:
         )
 
 
-async def audio_stream(ws: WebSocket) -> None:
-    await Connection(ws).run()
+def create_app(front_dir: Path | None, profiles: tuple[Profile, ...]) -> FastAPI:
+    """front_dir : build Vite servi à la racine (même origine que /ws/audio), ou None (dev).
+    profiles : contrat contracts/profiles.json, chargé une fois au démarrage."""
+    known_profiles = frozenset(p.id for p in profiles)
 
+    async def audio_stream(ws: WebSocket) -> None:
+        await Connection(ws, known_profiles).run()
 
-def create_app(front_dir: Path | None) -> FastAPI:
-    """front_dir : build Vite servi à la racine (même origine que /ws/audio), ou None (dev)."""
     application = FastAPI(title="Crozidrone audio stream")
     application.add_api_websocket_route("/ws/audio", audio_stream)
     if front_dir is not None:
@@ -243,4 +247,4 @@ def create_app(front_dir: Path | None) -> FastAPI:
 
 
 _front_dir = os.environ.get("FRONT_DIR")
-app = create_app(Path(_front_dir) if _front_dir else None)
+app = create_app(Path(_front_dir) if _front_dir else None, load_profiles())

@@ -1,8 +1,14 @@
 import copy
+import json
 import uuid
+from pathlib import Path
 
 import numpy as np
 import pytest
+
+# Identifiants lus dans le contrat partagé : les tests n'ont pas leur propre copie de la liste.
+_CONTRACT = Path(__file__).parent / "contracts" / "profiles.json"
+TEAM_PROFILES = frozenset(p["id"] for p in json.loads(_CONTRACT.read_text("utf-8"))["profiles"])
 
 BASE_SETTINGS = {
     "capture_contract": "edth.web-pcm.v1",
@@ -29,7 +35,7 @@ def make_hello(**overrides):
         "type": "hello",
         "protocol": "crozidrone.audio-stream.v1",
         "session_id": str(uuid.uuid4()),
-        "profile": "axel",
+        "profile": "tristan",
         "capture_settings": settings,
         "captured_at": "2026-11-21T10:00:00.000Z",
         "user_agent": settings["browser"],

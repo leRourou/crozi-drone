@@ -7,6 +7,7 @@ WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY vendor/ /src/vendor/
+COPY contracts/ /src/contracts/
 COPY web/ ./
 RUN npm run build
 
@@ -27,6 +28,8 @@ COPY services/api/pyproject.toml services/api/
 RUN uv sync --frozen --no-dev --package api --no-install-workspace
 COPY packages/ packages/
 COPY services/ services/
+# Contrat partagé (profils) lu au démarrage : contracts/profiles.json relatif à WORKDIR.
+COPY contracts/ contracts/
 RUN uv sync --frozen --no-dev --package api --no-editable
 COPY --from=front /src/web/dist/ ./static/
 
