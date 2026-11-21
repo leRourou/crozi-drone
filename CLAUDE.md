@@ -1,7 +1,8 @@
 # Crozidrone — captation audio temps réel (EDTH Paris 2026)
 
 Chaîne : téléphone (navigateur) → micro via le module partagé → WebSocket binaire → FastAPI.
-Périmètre actuel : captation + logs de preuve ; `packages/localization` présent mais pas encore branché.
+Périmètre actuel : captation + logs de preuve, état général des téléphones (`/ws/state`, page `display.html`),
+② simulé (trajectoire scriptée) en attendant le modèle ; `packages/localization` présent mais pas encore branché.
 Hors périmètre : iPhone / Safari. Le profil WebKit reste accepté tel quel (module partagé) mais n'est pas validé.
 
 ## Invariants non négociables (contrat audio)
@@ -26,6 +27,7 @@ Contrat de capture : `docs/audio-capture-contract.md`. Protocole : `docs/protoco
 # Python (workspace uv, tout depuis la racine)
 uv sync --all-packages && uv run ruff check && uv run pytest
 SAVE_SESSIONS=1 uv run uvicorn api.main:app --port 8000     # écrit ./recordings/
+DISTANCE_ESTIMATOR=scripted uv run uvicorn api.main:app --port 8000  # drone virtuel (défaut : none)
 # front (HTTPS fourni par ngrok / Tailscale Serve devant le port Vite)
 cd web && npm install && npm test && npm run build
 cd web && npm run dev
@@ -40,30 +42,39 @@ Arborescence : un package Python par module, assemblés par `services/api`.
 ```
 packages/audio-capture/   ① récupération du son : protocol.py (validation à la frontière),
                              session.py (seq + SHA), stats.py (diagnostic), recording.py
-services/api/             main.py (endpoint /ws/audio, create_app, logs `event=… clé=valeur`), logfmt.py,
-                             profiles.py (charge et valide contracts/profiles.json au démarrage)
+packages/distance-estimation/ ② son → distance : estimator.py (interface AudioWindow → DistanceEstimate,
+                             range None = pas de drone), windows.py (fenêtres de 500 ms d'une session),
+                             scripted.py (mock : drone virtuel sur un cercle, vraie distance)
+services/api/             main.py (/ws/audio, /ws/state, create_app, make_estimator, logs `event=… clé=valeur`),
+                             state.py (PhoneRegistry : état par téléphone, la session la plus récente gagne),
+                             logfmt.py, profiles.py (charge et valide contracts/profiles.json au démarrage)
 contracts/profiles.json   seule source des téléphones (id, libellé, position x ; y ; z en mètres) pour Python et TS
 web/src/capture/          ① page téléphone : packetizer.ts, streamer.ts (session, relance, reconnexion),
                              wakelock.ts (écran allumé), App.tsx (UI)
-web/src/shared/           edth-capture.d.ts (types du module partagé), profiles.ts (contrat, alias `@contracts`)
+web/src/display/          ④ page d'état (display.html, PC) : state.ts (message validé à l'arrivée),
+                             stateclient.ts (abonnement /ws/state, reconnexion), format.ts, App.tsx (UI)
+web/src/shared/           edth-capture.d.ts (types du module partagé), profiles.ts (contrat, alias `@contracts`),
+                             net.ts (URL ws/wss, délai de reconnexion), theme.css (palette)
 packages/localization/    ③ distances → position : `localiser_drone` (capteurs 3D, `tol` relative).
                              Non intégré : pas de pyproject, exclu du workspace uv et de ruff,
                              tests (`localization_unit_tests.py`) non collectés par pytest.
 conftest.py               helpers de test partagés (make_hello, sine, packet, TEAM_PROFILES lu du contrat)
 ```
 À venir (ne pas créer avant d'en avoir le code) : `packages/features` (prétraitement commun
-entraînement ↔ inférence), `packages/distance-estimation` (② son → distance),
-`packages/bus`, `ml/`,
-`web/src/display/` (④ affichage des sources sonores + position du drone).
+entraînement ↔ inférence), vrai modèle de ② (même interface que `scripted.py`),
+`packages/bus` (alignement temporel), `ml/`, position du drone sur la page d'état (③ branché).
 Règle : un module n'importe jamais un autre module ; seul `services/api` les assemble.
 
 - Lot 2 fait : `network_too_slow`, reconnexion avec délai croissant (`docs/protocol.md`), Wake Lock.
+- Lot 3 fait : z = 0 dans le contrat, mock de ② (`DISTANCE_ESTIMATOR=scripted`), `/ws/state` + page d'état,
+  `session_replaced`.
 
 ## Qualité
 `~/tools/crapper/crapper`, `~/tools/dryer/dryer`, `~/tools/mutator/mutator` (composants UI purs
-exclus : `App.tsx`, `main.tsx`). `vendor/` est ignoré par ces outils.
+exclus : `App.tsx`, `main.tsx` des deux pages). `vendor/` est ignoré par ces outils.
 - Python (depuis la racine) : `coverage run --source=packages,services -m pytest` puis
   `coverage lcov -o target/coverage/python/lcov.info`, avant
   `crapper --use-existing-coverage packages services`.
 - TS : `npm run coverage` puis `crapper --use-existing-coverage src/<fichier>.ts` ;
-  mutator : `--test-command "npx vitest run"`.
+  mutator : `--test-command "npx vitest run"`. La couverture V8 ne marque que la 1ʳᵉ ligne d'une expression
+  sur plusieurs lignes : mutator les dit « non couvertes » ; les vérifier avec `--no-coverage --lines …`.
