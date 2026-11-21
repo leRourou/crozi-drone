@@ -148,34 +148,63 @@ def bundle_manifest(threshold, rate=BUNDLE_RATE):
     }
 
 
-def write_model_bundle(root, pcm=None, seed=3):
-    """Écrit un bundle complet dans root et renvoie (manifeste, lot de parité) pour les tests.
-    Le seuil vaut la médiane des scores : le lot contient des fenêtres des deux côtés du seuil."""
+EXCERPT_48K = 72_000  # une session du lot de parité r0 : amorce 500 ms + fenêtre 1 s
+
+
+def _b64(array):
     import base64
 
+    return base64.b64encode(np.asarray(array).astype("<i2").tobytes()).decode()
+
+
+def _parity_case(k, excerpt, start, window, features, score, distance, threshold):
+    from dsp import FLAT_COLS, LOGMEL
+
+    return {
+        "sample_id": f"case-{k}", "device_id": "test", "split": "dev",
+        "drone_present": None, "distance_m": None,
+        "excerpt": {"pcm48_b64": _b64(excerpt), "samples_48k": len(excerpt),
+                    "window_start_offset_24k": int(start), "guard_samples_48k": 24000},
+        "expected": {"window_pcm24_b64": _b64(window),
+                     "flat": {c: float(features[c]) for c in FLAT_COLS},
+                     "logmel": [float(v) for v in features[LOGMEL]],
+                     "score": float(score), "distance_m": float(distance),
+                     "present": bool(score >= threshold)},
+    }
+
+
+def write_model_bundle(root, seed=3, cases=4):
+    """Écrit un bundle complet dans root (format de la release r0) ; renvoie (manifeste, lot).
+    Lot de parité : `cases` sessions de 1,5 s découpées dans le signal de test, chacune avec sa
+    fenêtre attendue calculée hors ligne (dsp.iter_windows), comme 05_export_release du repo ML.
+    Le seuil vaut la médiane des scores : le lot a des cas des deux côtés du seuil."""
     import joblib
     import pandas as pd
-    from dsp import FLAT_COLS, iter_windows, window_features
+    from dsp import iter_windows, window_features
 
-    pcm = bundle_signal() if pcm is None else pcm
-    starts, rows = zip(
-        *((i, window_features(w, BUNDLE_RATE)) for i, w in iter_windows(pcm, BUNDLE_RATE)),
-        strict=True,
-    )
-    frame = pd.DataFrame(list(rows))
+    pcm = bundle_signal(gap_len=0)
+    rows = [window_features(w, BUNDLE_RATE) for _, w in iter_windows(pcm, BUNDLE_RATE)]
+    frame = pd.DataFrame(rows)
     cnn, mlp = _test_models(frame, np.random.default_rng(seed))
-    scores = cnn.predict(frame)
+    excerpts = [pcm[k * EXCERPT_48K : (k + 1) * EXCERPT_48K] for k in range(cases)]
+    windows = [next(iter_windows(x, BUNDLE_RATE)) for x in excerpts]
+    features = [window_features(w, BUNDLE_RATE) for _, w in windows]
+    scores = cnn.predict(pd.DataFrame(features))
+    distances = mlp.predict(pd.DataFrame(features))
     threshold = float(np.median(scores))
-    distances = mlp.predict(frame)
+    manifest = bundle_manifest(threshold)
     fixture = {
-        "pcm48_s16le_b64": base64.b64encode(pcm.astype("<i2").tobytes()).decode(),
-        "windows": [
-            {"start": int(i), "flat": [float(r[c]) for c in FLAT_COLS], "score": float(s),
-             "distance_m": float(d) if s >= threshold else None}
-            for i, r, s, d in zip(starts, rows, scores, distances, strict=True)
+        "contract": manifest["contract"], "release": manifest["release"],
+        "model_rate_hz": BUNDLE_RATE, "transport_rate_hz": 48000, "chunk_hint_samples_48k": 2400,
+        "replay": "une session = un extrait (amorce 500 ms + fenêtre 1 s) ; décimation continue "
+                  "par blocs, fenêtre à window_start_offset_24k",
+        "cases": [
+            _parity_case(k, x, i, w, f, s, d, threshold)
+            for k, (x, (i, w), f, s, d) in enumerate(
+                zip(excerpts, windows, features, scores, distances, strict=True)
+            )
         ],
     }
-    manifest = bundle_manifest(threshold)
     root = Path(root)
     for sub, model in (("detection", cnn), ("distance", mlp)):
         (root / sub).mkdir(parents=True, exist_ok=True)

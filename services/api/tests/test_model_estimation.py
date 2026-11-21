@@ -28,15 +28,16 @@ def test_a_local_bundle_is_used_as_is(tmp_path):
 def test_otherwise_the_pinned_revision_is_fetched_with_the_token(tmp_path):
     calls = []
 
-    def fetch(repo, revision, token):
-        calls.append((repo, revision, token))
+    def fetch(repo, revision, token, release):
+        calls.append((repo, revision, token, release))
         return tmp_path
 
     settings = Settings(
-        estimator="model", model_repo="team/model", model_revision=SHA, hf_token="hf_x"
+        estimator="model", model_repo="team/model", model_revision=SHA,
+        model_release="edth.audio.24k-1s.r0", hf_token="hf_x",
     )
-    assert resolve_bundle(settings, fetch=fetch) == tmp_path
-    assert calls == [("team/model", SHA, "hf_x")]
+    assert resolve_bundle(settings, fetch=fetch) == tmp_path / "edth.audio.24k-1s.r0"
+    assert calls == [("team/model", SHA, "hf_x", "edth.audio.24k-1s.r0")]
 
 
 def test_the_model_estimation_feeds_one_step_per_window_without_simulated_truth(
@@ -76,3 +77,14 @@ def test_a_phone_streaming_to_the_model_gets_detections_on_the_room_state(model_
     [noe] = [p for p in state["phones"] if p["profile"] == "noe"]
     assert state["estimator"] == "model"
     assert noe["detection"] is not None
+
+
+def test_the_release_folder_must_hold_the_announced_release(model_bundle, tmp_path):
+    snapshot = tmp_path / "snapshot"
+    shutil.copytree(model_bundle, snapshot / "edth.audio.24k-1s.r1")
+    settings = Settings(
+        estimator="model", model_repo="team/model", model_revision=SHA,
+        model_release="edth.audio.24k-1s.r1",
+    )
+    with pytest.raises(ValueError, match="test.24k-1s.r0"):
+        make_estimation(settings, load_profiles(), fetch=lambda *args: snapshot)

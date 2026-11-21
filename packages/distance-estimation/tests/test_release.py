@@ -1,5 +1,6 @@
 """Chargement d'un bundle de release (contrat d'intégration ML V1) : validé, sinon refusé."""
 
+import base64
 import json
 import shutil
 
@@ -81,6 +82,18 @@ def test_a_missing_model_file_is_refused(bundle):
     refused(bundle, "distance/model.joblib")
 
 
+def test_a_bundle_of_symlinks_like_the_hugging_face_cache_loads(model_bundle, tmp_path):
+    """Le cache HF range les fichiers d'un snapshot en liens vers des blobs hors du dossier."""
+    blobs, snapshot = tmp_path / "blobs", tmp_path / "snapshot"
+    shutil.copytree(model_bundle, blobs)
+    for blob in blobs.rglob("*"):
+        if blob.is_file():
+            link = snapshot / blob.relative_to(blobs)
+            link.parent.mkdir(parents=True, exist_ok=True)
+            link.symlink_to(blob)
+    assert load_release(snapshot).name == "test.24k-1s.r0"
+
+
 def test_a_model_file_outside_the_bundle_is_refused(bundle):
     edit(bundle, "manifest.json", lambda m: m["detection"].update(file="../model.joblib"))
     refused(bundle, "hors du bundle")
@@ -104,21 +117,6 @@ def test_a_release_must_list_both_frozen_files(bundle):
 def test_a_bundle_without_parity_set_is_refused(bundle):
     (bundle / "parity" / "fixture.json").unlink()
     refused(bundle, "parity/fixture.json")
-
-
-def test_a_score_that_the_live_path_does_not_reproduce_is_refused(bundle):
-    edit(bundle, "parity/fixture.json", lambda f: f["windows"][3].update(score=0.999))
-    refused(bundle, "parité")
-
-
-def test_features_that_the_live_path_does_not_reproduce_are_refused(bundle):
-    edit(bundle, "parity/fixture.json", lambda f: f["windows"][0]["flat"].__setitem__(0, -1.0))
-    refused(bundle, "parité")
-
-
-def test_a_different_set_of_valid_windows_is_refused(bundle):
-    edit(bundle, "parity/fixture.json", lambda f: f["windows"].pop())
-    refused(bundle, "parité")
 
 
 # ---------------------------------------------------------------- manifeste seul (sans pickles)
@@ -181,27 +179,61 @@ def test_a_score_exactly_at_the_threshold_means_a_drone():
     assert below.distance_m is None
 
 
-def test_a_tiny_feature_difference_breaks_parity(bundle):
-    def change(f):
-        f["windows"][0]["flat"][0] += 1e-6
+# ---------------------------------------------------------------- lot de parité (format r0)
 
+
+def present_case(f):
+    return next(c for c in f["cases"] if c["expected"]["present"])
+
+
+def absent_case(f):
+    return next(c for c in f["cases"] if not c["expected"]["present"])
+
+
+def zeroed_pcm(b64):
+    return base64.b64encode(bytes(len(base64.b64decode(b64)))).decode()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param(lambda f: present_case(f)["expected"].update(score=0.999), id="score"),
+        pytest.param(lambda f: f["cases"][0]["expected"]["flat"].update(
+            f0=f["cases"][0]["expected"]["flat"]["f0"] + 1e-6), id="tiny-flat-difference"),
+        pytest.param(lambda f: f["cases"][0]["expected"]["logmel"].__setitem__(
+            5, f["cases"][0]["expected"]["logmel"][5] + 1e-3), id="logmel"),
+        pytest.param(lambda f: absent_case(f)["expected"].update(present=True), id="presence"),
+        pytest.param(lambda f: present_case(f)["expected"].update(
+            distance_m=present_case(f)["expected"]["distance_m"] + 0.01), id="distance"),
+        pytest.param(lambda f: f["cases"][0]["expected"].update(
+            window_pcm24_b64=zeroed_pcm(f["cases"][0]["expected"]["window_pcm24_b64"])),
+            id="decimated-window"),
+        pytest.param(lambda f: f["cases"][0]["excerpt"].update(window_start_offset_24k=18000),
+                     id="window-position"),
+    ],
+)
+def test_a_case_the_live_path_does_not_reproduce_breaks_parity(bundle, change):
     edit(bundle, "parity/fixture.json", change)
     refused(bundle, "parité")
 
 
-def test_a_distance_given_where_offline_said_no_drone_breaks_parity(bundle):
-    def change(f):
-        absent = next(w for w in f["windows"] if w["distance_m"] is None)
-        absent["distance_m"] = 3.0
+def test_the_distance_of_an_absent_case_is_not_compared(bundle):
+    """La distance n'est produite que si la présence est établie (contrat §4) : hors ligne, le
+    lot la donne quand même pour les cas absents, sans que le chemin live ait à la reproduire."""
+    edit(bundle, "parity/fixture.json", lambda f: absent_case(f)["expected"].update(distance_m=9.9))
+    assert load_release(bundle).name == "test.24k-1s.r0"
 
-    edit(bundle, "parity/fixture.json", change)
+
+def test_an_empty_parity_set_is_refused(bundle):
+    edit(bundle, "parity/fixture.json", lambda f: f.update(cases=[]))
     refused(bundle, "parité")
 
 
-def test_a_different_distance_breaks_parity(bundle):
+def test_an_excerpt_that_is_not_whole_chunks_is_refused(bundle):
     def change(f):
-        present = next(w for w in f["windows"] if w["distance_m"] is not None)
-        present["distance_m"] += 0.01
+        excerpt = f["cases"][0]["excerpt"]
+        pcm = base64.b64decode(excerpt["pcm48_b64"])
+        excerpt["pcm48_b64"] = base64.b64encode(pcm[:-2]).decode()
 
     edit(bundle, "parity/fixture.json", change)
     refused(bundle, "parité")

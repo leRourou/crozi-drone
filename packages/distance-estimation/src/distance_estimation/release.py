@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,7 +43,7 @@ class Predictor(Protocol):
 class Decision:
     """Sortie des modèles pour une fenêtre valide : distance None sous le seuil de détection."""
 
-    flat: tuple[float, ...]
+    features: Mapping[str, Any]  # sortie de dsp.window_features (colonnes plates + logmel)
     score: float
     distance_m: float | None
 
@@ -58,11 +59,10 @@ class Release:
     def decide(self, window: np.ndarray) -> Decision:
         features = dsp.window_features(window, self.windowing.rate)
         frame = pd.DataFrame([features])
-        flat = tuple(float(features[c]) for c in dsp.FLAT_COLS)
         score = float(self.detection.predict(frame)[0])
         if score < self.threshold:
-            return Decision(flat, score, None)
-        return Decision(flat, score, float(self.distance.predict(frame)[0]))
+            return Decision(features, score, None)
+        return Decision(features, score, float(self.distance.predict(frame)[0]))
 
 
 @dataclass(frozen=True)
@@ -91,8 +91,10 @@ def load_release(root: Path) -> Release:
 
 
 def _bundle_file(root: Path, name: str) -> Path:
-    path = (root / name).resolve()
-    if not path.is_relative_to(root.resolve()):
+    """Confinement vérifié sur le chemin écrit (pas de « .. » qui sorte du bundle), sans suivre
+    les liens : le cache Hugging Face range les fichiers d'un snapshot en liens vers ses blobs."""
+    path = Path(os.path.normpath(root / name))
+    if not path.is_relative_to(Path(os.path.normpath(root))):
         raise ValueError(f"fichier hors du bundle : {name}")
     if not path.is_file():
         raise ValueError(f"fichier absent du bundle : {name}")
@@ -186,25 +188,41 @@ def _threshold(value: Any) -> float:
 
 
 def check_parity(release: Release, fixture: Mapping[str, Any]) -> None:
-    """Rejoue le PCM48 du lot par blocs d'un pas et compare aux fenêtres calculées hors ligne."""
-    pcm = np.frombuffer(base64.b64decode(_field(fixture, "pcm48_s16le_b64")), "<i2")
-    expected = _field(fixture, "windows")
+    """Lot de parité de la release : chaque cas est une session (amorce + une fenêtre) rejouée par
+    le chemin live, blocs d'un pas, et comparée à la fenêtre calculée hors ligne."""
+    cases = _field(fixture, "cases")
+    if not cases:
+        raise ValueError("parité : lot vide")
+    for case in cases:
+        problem = _replay_case(release, case)
+        if problem is not None:
+            raise ValueError(f"parité : {case.get('sample_id', '?')} : {problem}")
+
+
+def _replay_case(release: Release, case: Mapping[str, Any]) -> str | None:
+    excerpt, want = _field(case, "excerpt"), _field(case, "expected")
+    pcm = np.frombuffer(base64.b64decode(_field(excerpt, "pcm48_b64")), "<i2")
     chunk = release.windowing.chunk_frames
+    if len(pcm) % chunk:
+        return f"extrait de {len(pcm)} échantillons, pas un multiple du bloc ({chunk})"
     stream = Stream(release.windowing)
-    steps = [stream.push(pcm[i : i + chunk]) for i in range(0, len(pcm) - chunk + 1, chunk)]
-    live = [(s.start, release.decide(s.pcm)) for s in steps if isinstance(s, Ready)]
-    if [start for start, _ in live] != [w["start"] for w in expected]:
-        raise ValueError("parité : les fenêtres valides diffèrent de la préparation hors ligne")
-    for (start, got), want in zip(live, expected, strict=True):
-        if not _same(got, want):
-            raise ValueError(f"parité : écart sur la fenêtre {start} (score {got.score})")
+    last = [stream.push(pcm[i : i + chunk]) for i in range(0, len(pcm), chunk)][-1]
+    if not isinstance(last, Ready) or last.start != _field(excerpt, "window_start_offset_24k"):
+        return f"le chemin live ne produit pas la fenêtre attendue ({last})"
+    if last.pcm.astype("<i2").tobytes() != base64.b64decode(_field(want, "window_pcm24_b64")):
+        return "fenêtre décimée différente"
+    got = release.decide(last.pcm)
+    return None if _same(got, want) else f"décision différente (score live {got.score})"
 
 
 def _same(got: Decision, want: Mapping[str, Any]) -> bool:
-    if not np.allclose(got.flat, want["flat"], rtol=0, atol=FEATURE_ATOL):
+    flat = [got.features[c] for c in dsp.FLAT_COLS]
+    if not np.allclose(flat, [want["flat"][c] for c in dsp.FLAT_COLS], rtol=0, atol=FEATURE_ATOL):
+        return False
+    if not np.allclose(got.features[dsp.LOGMEL], want["logmel"], rtol=0, atol=FEATURE_ATOL):
         return False
     if abs(got.score - want["score"]) > DECISION_ATOL:
         return False
-    if (got.distance_m is None) != (want["distance_m"] is None):
+    if (got.distance_m is not None) != want["present"]:
         return False
     return got.distance_m is None or abs(got.distance_m - want["distance_m"]) <= DECISION_ATOL

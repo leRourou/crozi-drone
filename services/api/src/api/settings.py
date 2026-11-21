@@ -17,6 +17,7 @@ from audio_capture.protocol import SAMPLE_RATE
 
 ESTIMATORS = ("none", "scripted", "model")
 _SHA = re.compile(r"[0-9a-f]{40}")
+_FOLDER = re.compile(r"[\w.-]*[\w-][\w.-]*")  # un nom de dossier simple : ni "/", ni "." ou ".."
 
 # Nature d'une valeur : durée en ms (entier > 0), réel > 0, réel ≥ 0, réel quelconque (fini),
 # texte facultatif (une variable vide compte comme absente).
@@ -71,6 +72,7 @@ class Settings:
     model_dir: str | None = _setting("DISTANCE_MODEL_DIR", _TEXT, None)
     model_repo: str | None = _setting("DISTANCE_MODEL_REPO", _TEXT, None)
     model_revision: str | None = _setting("DISTANCE_MODEL_REVISION", _TEXT, None)
+    model_release: str | None = _setting("DISTANCE_MODEL_RELEASE", _TEXT, None)  # dossier du repo
     model_uncertainty: float = _setting("MODEL_UNCERTAINTY", _POSITIVE, 0.10)  # ± relatif annoncé
     hf_token: str | None = field(  # secret : absent du repr (logs, traces)
         default=None, repr=False, metadata={"env": "HF_TOKEN", "kind": _TEXT}
@@ -95,6 +97,10 @@ class Settings:
         if self.model_revision is None or not _SHA.fullmatch(self.model_revision):
             raise ValueError(
                 f"DISTANCE_MODEL_REVISION must be a 40-hex commit sha, got {self.model_revision!r}"
+            )
+        if self.model_release is None or not _FOLDER.fullmatch(self.model_release):
+            raise ValueError(
+                f"DISTANCE_MODEL_RELEASE must name the release folder, got {self.model_release!r}"
             )
 
     @property

@@ -30,6 +30,7 @@ def test_defaults_without_environment():
         model_dir=None,
         model_repo=None,
         model_revision=None,
+        model_release=None,
         model_uncertainty=0.10,
         hf_token=None,
     )
@@ -116,6 +117,11 @@ def test_window_frames_at_48_khz():
         ({"DISTANCE_ESTIMATOR": "model", "DISTANCE_MODEL_REPO": "team/model",
           "DISTANCE_MODEL_REVISION": "main"}, "DISTANCE_MODEL_REVISION"),
         ({"DISTANCE_ESTIMATOR": "model", "DISTANCE_MODEL_REVISION": SHA}, "DISTANCE_MODEL_REPO"),
+        ({"DISTANCE_ESTIMATOR": "model", "DISTANCE_MODEL_REPO": "team/model",
+          "DISTANCE_MODEL_REVISION": SHA}, "DISTANCE_MODEL_RELEASE"),
+        ({"DISTANCE_ESTIMATOR": "model", "DISTANCE_MODEL_REPO": "team/model",
+          "DISTANCE_MODEL_REVISION": SHA, "DISTANCE_MODEL_RELEASE": "../etc"},
+         "DISTANCE_MODEL_RELEASE"),
     ],
 )
 def test_an_invalid_value_refuses_to_start_and_names_the_variable(env, variable):
@@ -139,12 +145,14 @@ def test_the_model_comes_from_a_pinned_hugging_face_revision():
         "DISTANCE_ESTIMATOR": "model",
         "DISTANCE_MODEL_REPO": "team/model",
         "DISTANCE_MODEL_REVISION": SHA,
+        "DISTANCE_MODEL_RELEASE": "edth.audio.24k-1s.r0",
         "HF_TOKEN": "hf_secret",
         "MODEL_UNCERTAINTY": "0.2",
     }
     s = load_settings(env)
     assert (s.model_repo, s.model_revision, s.hf_token) == ("team/model", SHA, "hf_secret")
-    assert (s.model_dir, s.model_uncertainty) == (None, 0.2)
+    assert (s.model_release, s.model_dir) == ("edth.audio.24k-1s.r0", None)
+    assert s.model_uncertainty == 0.2
 
 
 def test_a_local_bundle_needs_no_hugging_face_repo():

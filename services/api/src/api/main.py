@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.fusion import TruthFn, run_fusion
 from api.logfmt import kv, short_browser
-from api.model_fetch import resolve_bundle
+from api.model_fetch import Fetch, fetch_release, resolve_bundle
 from api.profiles import Profile, load_profiles
 from api.settings import Settings, load_settings
 from api.state import PhoneRegistry, PhoneSession
@@ -65,21 +65,28 @@ class Estimation:
     truth: TruthFn | None = None  # position vraie du drone, en simulation seulement
 
 
-def make_estimation(settings: Settings, profiles: tuple[Profile, ...]) -> Estimation | None:
-    """None quand DISTANCE_ESTIMATOR=none : aucune détection, donc aucun faux drone affiché."""
+def make_estimation(
+    settings: Settings, profiles: tuple[Profile, ...], fetch: Fetch = fetch_release
+) -> Estimation | None:
+    """None quand DISTANCE_ESTIMATOR=none : aucune détection, donc aucun faux drone affiché.
+    fetch : téléchargement de la release (DISTANCE_ESTIMATOR=model), remplaçable en test."""
     if settings.estimator == "none":
         return None
     if settings.estimator == "model":
-        return _model_estimation(settings)
+        return _model_estimation(settings, fetch)
     return _scripted_estimation(settings, profiles)
 
 
-def _model_estimation(settings: Settings) -> Estimation:
+def _model_estimation(settings: Settings, fetch: Fetch) -> Estimation:
     """Release chargée et validée (contrat, empreintes, parité) ; tout échec empêche de démarrer.
     Les blocs reçus font un pas du modèle : DISTANCE_WINDOW_MS ne concerne que le simulateur."""
-    release = load_release(resolve_bundle(settings))
-    estimator = ModelEstimator(release, settings.model_uncertainty)
+    release = load_release(resolve_bundle(settings, fetch))
     local = settings.model_dir is not None
+    if not local and release.name != settings.model_release:
+        raise ValueError(
+            f"le dossier {settings.model_release} contient la release {release.name}"
+        )
+    estimator = ModelEstimator(release, settings.model_uncertainty)
     source, revision = ("local", None) if local else (settings.model_repo, settings.model_revision)
     log.info(kv("model_loaded", release=release.name, source=source, revision=revision))
     return Estimation(estimator, estimator.chunk_frames)
