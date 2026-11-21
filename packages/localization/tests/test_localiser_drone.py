@@ -1,15 +1,9 @@
-import sys
-from pathlib import Path
-
-# Ajoute packages/localization/src au chemin de recherche des modules
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from localization_calculation import localiser_drone
-
 import time
 import unittest
 
 import numpy as np
+
+from localization import localiser_drone
 
 CAPTEURS = np.array([[0, 0, 0], [100, 0, 0], [50, 80, 2]], dtype=float)
 DRONE = np.array([40.0, 30.0, 25.0])
@@ -121,6 +115,25 @@ class TestLocaliserDrone(unittest.TestCase):
             localiser_drone(CAPTEURS, d)
         moyenne = (time.perf_counter() - t0) / 5
         self.assertLess(moyenne, 0.5)  # seuil large, à ajuster selon ton besoin
+
+    def test_borne_basse_des_distances_drone_haut_pas_au_sol(self):
+        # Chaque distance borne aussi par le bas (coquille, pas boule) : un drone à 60 m
+        # de haut ne peut pas être placé au sol entre les capteurs.
+        drone = np.array([50.0, 30.0, 60.0])
+        res = localiser_drone(CAPTEURS, distances_exactes(CAPTEURS, drone))
+        self.assertGreater(res["z_min"], 30.0)
+
+    def test_rayon_borne_par_la_plus_petite_distance(self):
+        # La zone tient dans chaque boule de rayon d * (1 + tol) : son rayon horizontal aussi.
+        d = distances_exactes(CAPTEURS, DRONE)
+        res = localiser_drone(CAPTEURS, d)
+        self.assertLessEqual(res["rayon_xy"], d.min() * (1 + res["tol_utilisee"]))
+
+    def test_tol_max_incluse(self):
+        capteurs = [[0, 0, 0], [100, 0, 0], [50, 30, 0]]
+        res = localiser_drone(capteurs, [40, 40, 40], tol=0.3, tol_max=0.3)
+        self.assertEqual(res["tol_utilisee"], 0.3)
+        self.assertIsNone(localiser_drone(capteurs, [40, 40, 40], tol=0.2, tol_max=0.2))
 
 
 if __name__ == "__main__":

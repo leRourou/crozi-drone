@@ -25,6 +25,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock .python-version ./
 COPY packages/audio-capture/pyproject.toml packages/audio-capture/
 COPY packages/distance-estimation/pyproject.toml packages/distance-estimation/
+COPY packages/localization/pyproject.toml packages/localization/
 COPY services/api/pyproject.toml services/api/
 RUN uv sync --frozen --no-dev --package api --no-install-workspace
 COPY packages/ packages/

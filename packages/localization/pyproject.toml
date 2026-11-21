@@ -1,0 +1,10 @@
+[project]
+name = "localization"
+version = "0.1.0"
+description = "③ Distances + positions des téléphones → zone où se trouve le drone"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2.0"]
+
+[build-system]
+requires = ["uv_build>=0.9,<0.14"]
+build-backend = "uv_build"

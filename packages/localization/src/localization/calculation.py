@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def localiser_drone(capteurs, distances, tol=0.10, z_sol=0.0,
                     n_xy=80, n_z=40, tol_max=0.5):
     """
@@ -42,7 +43,7 @@ def localiser_drone(capteurs, distances, tol=0.10, z_sol=0.0,
                 centre = Q[:, :2].mean(axis=0)
                 rayon = np.linalg.norm(Q[:, :2] - centre, axis=1).max()
                 return {
-		    "capteurs": capteurs,
+                    "capteurs": capteurs,
                     "centre_xy": centre.tolist(),
                     "rayon_xy": float(rayon),
                     "z_min": float(Q[:, 2].min()),
