@@ -55,7 +55,7 @@ services/api/             main.py (/ws/audio, /ws/state, create_app, make_estima
 contracts/profiles.json   seule source des téléphones (id, libellé, position x ; y ; z en mètres) pour Python et TS
 web/src/capture/          ① page téléphone : packetizer.ts, streamer.ts (session, relance, reconnexion),
                              wakelock.ts (écran allumé), App.tsx (UI)
-web/src/display/          ④ page d'état (display.html, PC) : state.ts (message validé à l'arrivée),
+web/src/display/          ④ page d'état (display.html ; /display redirige, en dev Vite taper /display.html) : state.ts (message validé à l'arrivée),
                              stateclient.ts (abonnement /ws/state, reconnexion), format.ts, App.tsx (UI)
 web/src/shared/           edth-capture.d.ts (types du module partagé), profiles.ts (contrat, alias `@contracts`),
                              net.ts (URL ws/wss, délai de reconnexion), theme.css (palette)

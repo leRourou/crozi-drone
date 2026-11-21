@@ -34,3 +34,14 @@ def test_the_websocket_accepts_exactly_the_profiles_given_to_the_app():
     with client.websocket_connect("/ws/audio") as ws:
         ws.send_text(json.dumps(make_hello(profile="tristan")))
         assert ws.receive_json()["code"] == "unknown_profile"
+
+
+def test_display_redirects_to_the_state_page(tmp_path):
+    (tmp_path / "index.html").write_text("captation")
+    (tmp_path / "display.html").write_text("<title>Crozidrone · état</title>")
+    client = TestClient(create_app(front_dir=tmp_path, profiles=load_profiles()))
+
+    redirect = client.get("/display", follow_redirects=False)
+    assert redirect.status_code == 307
+    assert redirect.headers["location"] == "/display.html"
+    assert "Crozidrone · état" in client.get("/display").text

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, WebSocket
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.logfmt import kv, short_browser
@@ -329,6 +330,8 @@ def create_app(
     application.add_api_websocket_route("/ws/audio", audio_stream)
     application.add_api_websocket_route("/ws/state", state_stream)
     if front_dir is not None:
+        # Adresse courte de la page d'état ; à déclarer avant le montage statique sur "/".
+        application.add_api_route("/display", lambda: RedirectResponse("/display.html"))
         application.mount("/", StaticFiles(directory=front_dir, html=True), name="front")
     return application
 
