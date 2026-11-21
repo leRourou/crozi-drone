@@ -112,6 +112,12 @@ def test_ping_and_end_are_parsed():
     assert parse_control(raw({"type": "end", "reason": "manual", "frames": 0})).frames == 0
 
 
+def test_network_too_slow_end_is_accepted_with_its_hash():
+    msg = {"type": "end", "reason": "network_too_slow", "frames": 7, "pcm_sha256": "cd"}
+    end = parse_control(raw(msg))
+    assert end == End(reason="network_too_slow", frames=7, pcm_sha256="cd")
+
+
 @pytest.mark.parametrize(
     "msg",
     [

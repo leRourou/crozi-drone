@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 PROTOCOL = "crozidrone.audio-stream.v1"
 KNOWN_CONTRACTS = frozenset({"edth.web-pcm.v1", "edth.web-pcm.webkit.v1"})
@@ -30,8 +30,8 @@ REQUIRED_FORMAT: dict[str, Any] = {
     "recorder": "audio_worklet_pcm",
 }
 
-EndReason = Literal["manual", "limit", "error"]
-END_REASONS: frozenset[str] = frozenset({"manual", "limit", "error"})
+EndReason = Literal["manual", "limit", "network_too_slow", "error"]
+END_REASONS: frozenset[str] = frozenset(get_args(EndReason))
 
 
 class ProtocolError(Exception):

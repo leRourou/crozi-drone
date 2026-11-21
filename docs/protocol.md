@@ -38,7 +38,10 @@ limite du module garde le profil.
 `{"type":"ping","t":<performance.now()>}` — le serveur renvoie `t` tel quel (aller-retour).
 
 ### `end` (texte, à l'arrêt)
-`{"type":"end","reason":"manual|limit|error","frames":<int>,"pcm_sha256":"<hex>"}`
+`{"type":"end","reason":"manual|limit|network_too_slow|error","frames":<int>,"pcm_sha256":"<hex>"}`
+
+- `network_too_slow` : le client a arrêté la capture car la WebSocket accumulait plus de ~5 s
+  d'audio non envoyé (`bufferedAmount`). Le hash est présent et vérifié comme pour `manual`.
 
 - `pcm_sha256` = SHA-256 de `wavBytes.subarray(44)` (partie audio du WAV produit par `stop()`).
 - Absent quand `reason` vaut `error` (le module ne produit pas de WAV après une erreur).
