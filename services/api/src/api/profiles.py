@@ -20,12 +20,13 @@ _ID = re.compile(r"[a-z0-9_]+")
 
 @dataclass(frozen=True)
 class Profile:
-    """Un téléphone : identifiant ASCII stable, libellé affiché, position en mètres (x ; y)."""
+    """Un téléphone : identifiant ASCII stable, libellé affiché, position en mètres (x ; y ; z)."""
 
     id: str
     label: str
     x_m: float
     y_m: float
+    z_m: float
 
 
 def _coordinate(position: dict[str, Any], axis: str) -> float:
@@ -45,7 +46,8 @@ def _parse_profile(obj: Any) -> Profile:
         raise ValueError(f"profile {pid}: label must be a non-empty string")
     if not isinstance(position, dict):
         raise ValueError(f"profile {pid}: position_m must be an object")
-    return Profile(pid, label, _coordinate(position, "x"), _coordinate(position, "y"))
+    x, y, z = (_coordinate(position, axis) for axis in "xyz")
+    return Profile(pid, label, x, y, z)
 
 
 def load_profiles(path: Path | None = None) -> tuple[Profile, ...]:

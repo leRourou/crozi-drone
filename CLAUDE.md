@@ -42,7 +42,7 @@ packages/audio-capture/   ① récupération du son : protocol.py (validation à
                              session.py (seq + SHA), stats.py (diagnostic), recording.py
 services/api/             main.py (endpoint /ws/audio, create_app, logs `event=… clé=valeur`), logfmt.py,
                              profiles.py (charge et valide contracts/profiles.json au démarrage)
-contracts/profiles.json   seule source des téléphones (id, libellé, position en mètres) pour Python et TS
+contracts/profiles.json   seule source des téléphones (id, libellé, position x ; y ; z en mètres) pour Python et TS
 web/src/capture/          ① page téléphone : packetizer.ts, streamer.ts (session, relance, reconnexion),
                              wakelock.ts (écran allumé), App.tsx (UI)
 web/src/shared/           edth-capture.d.ts (types du module partagé), profiles.ts (contrat, alias `@contracts`)

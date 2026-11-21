@@ -26,7 +26,7 @@ def test_without_front_dir_only_websocket_is_exposed():
 
 
 def test_the_websocket_accepts_exactly_the_profiles_given_to_the_app():
-    zoe = Profile(id="zoe", label="Téléphone de Zoé", x_m=0.0, y_m=0.0)
+    zoe = Profile(id="zoe", label="Téléphone de Zoé", x_m=0.0, y_m=0.0, z_m=0.0)
     client = TestClient(create_app(front_dir=None, profiles=(zoe,)))
     with client.websocket_connect("/ws/audio") as ws:
         ws.send_text(json.dumps(make_hello(profile="zoe")))

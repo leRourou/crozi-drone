@@ -21,7 +21,8 @@ Transport temps réel du PCM produit par le module partagé `vendor/edth/audio_c
 
 `profile` : téléphone de l'équipe choisi sur la page avant d'enregistrer (obligatoire, non mémorisé).
 Identifiants ASCII stables (`[a-z0-9_]+`). **Référence unique : `contracts/profiles.json`**
-(identifiant, libellé affiché, position du téléphone `position_m` en mètres, repère local x ; y).
+(identifiant, libellé affiché, position du téléphone `position_m` en mètres, repère local x ; y ; z,
+z = hauteur, 0 pour les téléphones posés au sol).
 Le front l'importe au build (`web/src/shared/profiles.ts`) ; `services/api` le valide au démarrage
 (chemin modifiable par `PROFILES_FILE`) et transmet les identifiants à `parse_hello`. Une relance après
 la limite du module garde le profil.
