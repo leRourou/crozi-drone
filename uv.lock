@@ -10,6 +10,7 @@ resolution-markers = [
 members = [
     "api",
     "audio-capture",
+    "distance-estimation",
 ]
 
 [manifest.dependency-groups]
@@ -232,6 +233,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ed/72/205999bf9be05e3bd1ff6eeb475f8a1a084cdba575385e09a6e088c43614/coverage-7.17.4-cp315-cp315t-win_arm64.whl", hash = "sha256:7720afcf240957c785051e5ebee44b46ffb594938e2072c9f880487f7ea43023", size = 232306, upload-time = "2026-11-20T20:09:43.811Z" },
     { url = "https://files.pythonhosted.org/packages/fb/b5/3039295337fcda9dfcaf6d4d294246c4400587d8f4a23b29b001c5cea588/coverage-7.17.4-py3-none-any.whl", hash = "sha256:0f9547c30aeef70904ede391f4cb43d2ddd0a0d2d8fb4a96c75cc422f64afaac", size = 220592, upload-time = "2026-11-20T20:09:44.939Z" },
 ]
+
+[[package]]
+name = "distance-estimation"
+version = "0.1.0"
+source = { editable = "packages/distance-estimation" }
 
 [[package]]
 name = "fastapi"

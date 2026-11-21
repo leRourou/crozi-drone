@@ -13,7 +13,11 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["packages/audio-capture/tests", "services/api/tests"]
+testpaths = [
+    "packages/audio-capture/tests",
+    "packages/distance-estimation/tests",
+    "services/api/tests",
+]
 
 [tool.ruff]
 line-length = 100
@@ -24,4 +28,4 @@ extend-exclude = ["packages/localization"]  # non intégré, voir [tool.uv.works
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["audio_capture", "api"]
+known-first-party = ["audio_capture", "distance_estimation", "api"]
