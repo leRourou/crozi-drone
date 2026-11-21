@@ -1,4 +1,4 @@
-# Protocole WebSocket `thc.audio-stream.v1`
+# Protocole WebSocket `crozidrone.audio-stream.v1`
 
 Transport temps réel du PCM produit par le module partagé `vendor/edth/audio_capture.js`
 (contrats `edth.web-pcm.v1` / `edth.web-pcm.webkit.v1`, voir `audio-capture-contract.md`).
@@ -13,7 +13,7 @@ Transport temps réel du PCM produit par le module partagé `vendor/edth/audio_c
 
 ### `hello` (texte, premier message obligatoire)
 ```json
-{ "type": "hello", "protocol": "thc.audio-stream.v1", "session_id": "<uuid v4>",
+{ "type": "hello", "protocol": "crozidrone.audio-stream.v1", "session_id": "<uuid v4>",
   "capture_settings": { "…": "captureSettings renvoyé par start(), intégral" },
   "captured_at": "<ISO UTC>", "user_agent": "…" }
 ```

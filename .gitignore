@@ -9,6 +9,6 @@ coverage.xml
 .metrics/
 target/
 dist/
-front/test-results/
+web/test-results/
 e2e/artifacts/
 coverage/

@@ -1,4 +1,4 @@
-# THC — captation audio temps réel (EDTH Paris 2026)
+# Crozidrone — captation audio temps réel (EDTH Paris 2026)
 
 Téléphone (navigateur) → micro via le module partagé EDTH → WebSocket binaire → FastAPI.
 Le serveur prouve en direct qu'il reçoit le son : statistiques chaque seconde et, à l'arrêt,
@@ -8,14 +8,27 @@ comparaison du SHA-256 du PCM entre téléphone et serveur (`match=✅`).
 - Protocole : [docs/protocol.md](docs/protocol.md)
 - Invariants et commandes pour les agents : [CLAUDE.md](CLAUDE.md)
 
+## Arborescence
+```
+packages/audio-capture/   ① récupération du son (protocole, session, statistiques)
+services/api/             service FastAPI : assemble les modules, sert le front, /ws/audio
+web/src/capture/          ① page téléphone      web/src/shared/  types du module partagé
+vendor/edth/              module de capture partagé (intouchable)
+e2e/  docs/
+```
+À venir : `packages/features` (prétraitement commun entraînement ↔ inférence),
+`packages/distance-estimation` (② IA : son → distance), `packages/localization`
+(③ distances → position du drone), `packages/bus`, `contracts/`, `ml/`,
+`web/src/display/` (④ affichage des sources sonores et de la position du drone).
+
 ## Prérequis
 Node ≥ 20, [uv](https://docs.astral.sh/uv/), Python ≥ 3.11 (installé par uv si besoin).
 
 ## Lancer en local
 ```bash
-cd server && uv sync && SAVE_SESSIONS=1 uv run uvicorn app.main:app --port 8000
+uv sync --all-packages && SAVE_SESSIONS=1 uv run uvicorn api.main:app --port 8000
 # autre terminal
-cd front && npm install && npm run dev        # http://localhost:5173
+cd web && npm install && npm run dev          # http://localhost:5173
 ```
 Ouvrir http://localhost:5173 dans Chrome (localhost = contexte sécurisé, micro autorisé),
 cliquer **Démarrer**. Les logs du serveur ressemblent à :
@@ -43,7 +56,7 @@ tailscale serve --bg 5173
 ```
 Ouvrir `https://<machine>.<tailnet>.ts.net`.
 
-Autre domaine de tunnel : `THC_ALLOWED_HOSTS=mon.domaine.example npm run dev`.
+Autre domaine de tunnel : `CROZIDRONE_ALLOWED_HOSTS=mon.domaine.example npm run dev`.
 
 Sur le téléphone : Chrome (Android) ou Safari (iOS) à jour, micro intégré (pas de Bluetooth),
 écran allumé et onglet au premier plan pendant toute la capture. Vérifier dans le panneau de logs :
@@ -54,15 +67,15 @@ Sur le téléphone : Chrome (Android) ou Safari (iOS) à jour, micro intégré (
 Image unique (`Dockerfile` à la racine) : FastAPI sert le front buildé et `/ws/audio` sur la même
 origine. Le HTTPS (obligatoire pour le micro) est fourni par le proxy de Coolify.
 ```bash
-docker build -t thc-audio . && docker run --rm -p 8000:8000 thc-audio   # http://localhost:8000
+docker build -t crozidrone . && docker run --rm -p 8000:8000 crozidrone   # http://localhost:8000
 ```
 Coolify : build pack **Dockerfile**, port exposé **8000**, domaine en `https://`.
 Enregistrement optionnel : `SAVE_SESSIONS=1` + volume persistant monté sur `/data/recordings`.
 
 ## Tests
 ```bash
-cd server && uv run ruff check && uv run pytest          # 72 tests
-cd front && npm test && npm run build                    # 34 tests
+uv run ruff check && uv run pytest                       # 74 tests (depuis la racine)
+cd web && npm test && npm run build                      # 34 tests
 # E2E Chromium (faux micro 440 Hz), depuis la racine :
 uv run --no-project --with playwright python -m playwright install chromium   # une fois
 uv run --no-project --with playwright --with pytest --with numpy pytest e2e -q
