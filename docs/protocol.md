@@ -86,7 +86,7 @@ brutale), et deux onglets ouverts sur le même profil ne se relancent pas l'un l
 l'ordre de `contracts/profiles.json`. Les messages du client sont ignorés.
 
 ```json
-{ "type": "state", "server_time": <epoch s>, "estimator": "none|scripted", "drone": null,
+{ "type": "state", "server_time": <epoch s>, "estimator": "none|scripted", "drone": { … } | null,
   "phones": [
     { "profile": "noe", "label": "Téléphone de Noé", "position_m": {"x": 2.06, "y": 9.66, "z": 0},
       "status": "streaming|stale|offline|never_seen", "session_id": "…|null", "contract": "…|null",
@@ -120,10 +120,38 @@ virtuel sur une trajectoire connue).
 | `STATE_PERIOD_MS` | 250 | intervalle entre deux messages `state` |
 | `STALE_AFTER_MS` | 1000 | seuil `streaming` → `stale` |
 | `DETECTION_FRESH_MS` | 2000 | âge maximal d'une détection `fresh` |
+| `FUSION_SPREAD_MS` | 500 | écart maximal entre les détections combinées par ③ |
+| `SCRIPTED_OFFSET_EAST_M` | 0.5 | drone simulé : centre du cercle, décalage vers l'est depuis le barycentre des téléphones |
+| `SCRIPTED_OFFSET_NORTH_M` | 3 | idem vers le nord (y décroissant) |
+| `SCRIPTED_RADIUS_M` | 3 | rayon du cercle |
+| `SCRIPTED_ALTITUDE_M` | 1.5 | altitude (≥ 0) |
+| `SCRIPTED_PERIOD_S` | 20 | durée d'un tour |
+| `SCRIPTED_RANGE_M` | 5 | portée de détection : au-delà, « pas de drone » |
+| `SCRIPTED_UNCERTAINTY` | 0.10 | incertitude relative annoncée avec chaque distance |
 
-Les durées sont des entiers strictement positifs en millisecondes. Une valeur invalide empêche le serveur
+Les durées `*_MS` sont des entiers strictement positifs en millisecondes ; les autres valeurs sont des
+réels (point décimal). Une valeur invalide empêche le serveur
 de démarrer (message d'erreur nommant la variable).
-`drone` (position estimée) reste `null` tant que ③ n'est pas branché.
+### `drone` : résultat de ③
+
+`null` sans estimateur ou avant le premier calcul. Sinon, recalculé toutes les `STATE_PERIOD_MS` :
+
+```json
+{ "status": "located|insufficient|no_detection|inconsistent", "detecting": 3, "age_s": 0.1,
+  "zone": { "x_m": 3.1, "y_m": 7.9, "radius_m": 0.8, "z_m": 1.4, "z_min_m": 1.1, "z_max_m": 1.7,
+            "tolerance": 0.1, "degraded": false } | null,
+  "truth": { "x_m": 3.0, "y_m": 8.0, "z_m": 1.5 } | null }
+```
+
+- Détections combinées : dernière détection **avec distance** de chaque téléphone en session, fraîche
+  (≤ `DETECTION_FRESH_MS`) et à ≤ `FUSION_SPREAD_MS` de la plus récente. `detecting` = leur nombre.
+- `located` (`zone` présente) : au moins 3 détections et `localiser_drone` trouve une zone ;
+  `insufficient` : 1 ou 2 ; `no_detection` : 0 ; `inconsistent` : 3 ou plus mais distances incompatibles.
+- `zone` : repère de la salle (x vers l'est, y vers le sud, mètres) ; disque `radius_m` autour de
+  (`x_m`, `y_m`), altitude `z_m` dans [`z_min_m`, `z_max_m`] ; `tolerance` = plus grande incertitude des
+  détections, élargie si `degraded`.
+- `truth` : position vraie du drone simulé (`DISTANCE_ESTIMATOR=scripted`), pour vérifier la chaîne ;
+  `null` sinon.
 
 ## Enregistrement (`SAVE_SESSIONS=1`)
 

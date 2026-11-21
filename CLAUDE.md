@@ -2,8 +2,8 @@
 
 Chaîne : téléphone (navigateur) → micro via le module partagé → WebSocket binaire → FastAPI.
 Périmètre actuel : captation + logs de preuve, état général des téléphones (`/ws/state`, page `display.html`),
-② simulé (trajectoire scriptée) en attendant le modèle ; `packages/localization` intégré au workspace, pas encore
-appelé par `services/api`.
+② simulé (trajectoire scriptée) en attendant le modèle, ③ branché (`fusion.py`) ; la page d'état est le plan
+de la salle de démo (téléphones, cercles de distance, drone).
 Hors périmètre : iPhone / Safari. Le profil WebKit reste accepté tel quel (module partagé) mais n'est pas validé.
 
 ## Invariants non négociables (contrat audio)
@@ -51,22 +51,25 @@ packages/distance-estimation/ ② son → distance : estimator.py (interface Aud
 services/api/             main.py (/ws/audio, /ws/state, create_app, make_estimation, logs `event=… clé=valeur`),
                              settings.py (seul lecteur des variables d'environnement du temps réel),
                              state.py (PhoneRegistry : état par téléphone, la session la plus récente gagne),
+                             fusion.py (③ : sélection des détections, localiser_drone en thread, tâche de fond),
                              logfmt.py, profiles.py (charge et valide contracts/profiles.json au démarrage)
 contracts/profiles.json   seule source des téléphones (id, libellé, position x ; y ; z en mètres) pour Python et TS
 web/src/capture/          ① page téléphone : packetizer.ts, streamer.ts (session, relance, reconnexion),
                              wakelock.ts (écran allumé), App.tsx (UI)
-web/src/display/          ④ page d'état (display.html ; /display redirige, en dev Vite taper /display.html) : state.ts (message validé à l'arrivée),
-                             stateclient.ts (abonnement /ws/state, reconnexion), format.ts, App.tsx (UI)
+web/src/display/          ④ plan de salle (display.html ; /display redirige, en dev Vite taper /display.html) :
+                             state.ts (message validé à l'arrivée), stateclient.ts (abonnement, reconnexion),
+                             room.ts (plan de la salle en mètres), mapgeom.ts (cercles, écoute), format.ts,
+                             MapView.tsx / Panel.tsx / icons.tsx / App.tsx (UI)
 web/src/shared/           edth-capture.d.ts (types du module partagé), profiles.ts (contrat, alias `@contracts`),
                              net.ts (URL ws/wss, délai de reconnexion), theme.css (palette)
 packages/localization/    ③ distances → position : calculation.py `localiser_drone` (capteurs 3D, `tol`
-                             relative, grille ≈ 60 ms/appel : à sortir de la boucle asyncio). Code de Maxence,
+                             relative, grille ≈ 60 ms/appel, appelé dans un thread). Code de Maxence,
                              fins de ligne CRLF conservées.
 conftest.py               helpers de test partagés (make_hello, sine, packet, TEAM_PROFILES lu du contrat)
 ```
 À venir (ne pas créer avant d'en avoir le code) : `packages/features` (prétraitement commun
 entraînement ↔ inférence), vrai modèle de ② (même interface que `scripted.py`),
-`packages/bus` (alignement temporel), `ml/`, position du drone sur la page d'état (③ branché).
+`ml/`.
 Règle : un module n'importe jamais un autre module ; seul `services/api` les assemble.
 
 - Lot 2 fait : `network_too_slow`, reconnexion avec délai croissant (`docs/protocol.md`), Wake Lock.
@@ -74,10 +77,12 @@ Règle : un module n'importe jamais un autre module ; seul `services/api` les as
   `session_replaced`.
 - Tout se fait en temps réel : pas de stockage d'historique ni de rejeu (décision du 21/11/2026).
   Les WAV `SAVE_SESSIONS=1` restent une option de preuve, désactivée par défaut.
+- Lot 4 fait : drone simulé à l'échelle de la salle (`SCRIPTED_*`), ③ branché (`drone` dans `/ws/state`),
+  plan de salle cliquable. Pas de `packages/bus` : ③ ne combine que des détections à ≤ `FUSION_SPREAD_MS`.
 
 ## Qualité
 `~/tools/crapper/crapper`, `~/tools/dryer/dryer`, `~/tools/mutator/mutator` (composants UI purs
-exclus : `App.tsx`, `main.tsx` des deux pages). `vendor/` est ignoré par ces outils.
+exclus : `App.tsx`, `main.tsx`, `MapView.tsx`, `Panel.tsx`, `icons.tsx`). `vendor/` est ignoré par ces outils.
 - Python (depuis la racine) : `coverage run --source=packages,services -m pytest` puis
   `coverage lcov -o target/coverage/python/lcov.info`, avant
   `crapper --use-existing-coverage packages services`.
