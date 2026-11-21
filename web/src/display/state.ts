@@ -29,19 +29,54 @@ export interface PhoneState {
   readonly detection: Detection | null;
 }
 
+export type DroneStatus = "located" | "insufficient" | "no_detection" | "inconsistent";
+
+/** Zone où se trouve le drone (③), repère de la salle en mètres : x vers l'est, y vers le sud. */
+export interface Zone {
+  readonly x_m: number;
+  readonly y_m: number;
+  readonly radius_m: number;
+  readonly z_m: number;
+  readonly z_min_m: number;
+  readonly z_max_m: number;
+  readonly tolerance: number;
+  readonly degraded: boolean;
+}
+
+export interface Point3 {
+  readonly x_m: number;
+  readonly y_m: number;
+  readonly z_m: number;
+}
+
+interface DroneBase {
+  /** Téléphones dont les détections récentes ont été combinées. */
+  readonly detecting: number;
+  readonly age_s: number;
+  /** Position vraie du drone simulé (DISTANCE_ESTIMATOR=scripted) ; null sinon. */
+  readonly truth: Point3 | null;
+}
+
+/** Une zone n'existe que si le drone est localisé. */
+export type DroneView =
+  | (DroneBase & { readonly status: "located"; readonly zone: Zone })
+  | (DroneBase & { readonly status: Exclude<DroneStatus, "located">; readonly zone: null });
+
 export interface StateMessage {
   readonly type: "state";
   readonly server_time: number;
   readonly estimator: EstimatorName;
   readonly phones: readonly PhoneState[];
-  /** Position du drone : toujours null tant que ③ n'est pas branché. */
-  readonly drone: null;
+  /** Résultat de ③ ; null sans estimateur ou avant le premier calcul. */
+  readonly drone: DroneView | null;
 }
 
 type Obj = Record<string, unknown>;
 
 const STATUSES: readonly unknown[] = ["streaming", "stale", "offline", "never_seen"];
 const ESTIMATORS: readonly unknown[] = ["none", "scripted"];
+const DRONE_STATUSES: readonly unknown[] = ["located", "insufficient", "no_detection", "inconsistent"];
+const ZONE_NUMBERS = ["x_m", "y_m", "radius_m", "z_m", "z_min_m", "z_max_m", "tolerance"] as const;
 
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 const isNum = (v: unknown): v is number => typeof v === "number"; // JSON n'a ni NaN ni Infinity
@@ -53,6 +88,21 @@ function isDetection(d: unknown): boolean {
   if (!isObj(d) || !isNum(d.age_s) || typeof d.fresh !== "boolean") return false;
   if (d.drone === true) return isNum(d.distance_m) && isNum(d.uncertainty_rel);
   return d.drone === false && d.distance_m === null && d.uncertainty_rel === null;
+}
+
+function isZone(z: unknown): boolean {
+  return isObj(z) && ZONE_NUMBERS.every((k) => isNum(z[k])) && typeof z.degraded === "boolean";
+}
+
+function isPoint3(p: unknown): boolean {
+  return isObj(p) && isNum(p.x_m) && isNum(p.y_m) && isNum(p.z_m);
+}
+
+function isDroneView(d: unknown): boolean {
+  if (d === null) return true;
+  if (!isObj(d) || !DRONE_STATUSES.includes(d.status) || !isNum(d.detecting) || !isNum(d.age_s)) return false;
+  if (d.truth !== null && !isPoint3(d.truth)) return false;
+  return d.status === "located" ? isZone(d.zone) : d.zone === null;
 }
 
 function isPosition(p: unknown): boolean {
@@ -83,7 +133,7 @@ export function parseState(text: string): StateMessage | undefined {
     obj.type === "state" &&
     isNum(obj.server_time) &&
     ESTIMATORS.includes(obj.estimator) &&
-    obj.drone === null &&
+    isDroneView(obj.drone) &&
     Array.isArray(obj.phones) &&
     obj.phones.every(isPhone);
   return valid ? (obj as unknown as StateMessage) : undefined;

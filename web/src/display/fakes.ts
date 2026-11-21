@@ -19,3 +19,14 @@ export function phone(overrides: Record<string, unknown> = {}) {
 export function message(overrides: Record<string, unknown> = {}) {
   return { type: "state", server_time: 1795000000, estimator: "scripted", drone: null, phones: [phone()], ...overrides };
 }
+
+export function droneView(overrides: Record<string, unknown> = {}) {
+  return {
+    status: "located",
+    detecting: 3,
+    zone: { x_m: 3.1, y_m: 7.9, radius_m: 0.8, z_m: 1.4, z_min_m: 1.1, z_max_m: 1.7, tolerance: 0.1, degraded: false },
+    truth: { x_m: 3.0, y_m: 8.0, z_m: 1.5 },
+    age_s: 0.1,
+    ...overrides,
+  };
+}

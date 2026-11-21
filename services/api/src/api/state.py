@@ -11,6 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from api.fusion import Ranging
 from api.profiles import Profile
 from api.settings import Settings
 from distance_estimation.estimator import DistanceEstimate
@@ -92,6 +93,9 @@ class PhoneRegistry:
         self._settings = settings
         self._live: dict[str, PhoneSession] = {}
         self._last_seen: dict[str, float] = {}
+        self._positions = {p.id: (p.x_m, p.y_m, p.z_m) for p in profiles}
+        self._drone: dict[str, Any] | None = None
+        self._drone_at = 0.0
 
     @property
     def ids(self) -> frozenset[str]:
@@ -113,6 +117,34 @@ class PhoneRegistry:
         self._live[profile] = session
         self._last_seen[profile] = now
         return session
+
+    def rangings(self) -> list[Ranging]:
+        """Dernière détection avec distance de chaque session ouverte (pour ③)."""
+        found = []
+        for profile, session in self._live.items():
+            detection = session.detection
+            if detection is None or detection.estimate.range is None:
+                continue
+            rng = detection.estimate.range
+            found.append(
+                Ranging(
+                    profile,
+                    self._positions[profile],
+                    rng.distance_m,
+                    rng.uncertainty_rel,
+                    detection.received_at,
+                )
+            )
+        return found
+
+    def set_drone(self, view: dict[str, Any], now: float) -> None:
+        """Résultat de ③ (fusion.fuse_once), calculé à l'instant now (horloge monotone)."""
+        self._drone, self._drone_at = view, now
+
+    def _drone_view(self, now: float) -> dict[str, Any] | None:
+        if self._settings.estimator == "none" or self._drone is None:
+            return None
+        return {**self._drone, "age_s": now - self._drone_at}
 
     def _phone(self, profile: Profile, now: float) -> dict[str, Any]:
         session = self._live.get(profile.id)
@@ -141,5 +173,5 @@ class PhoneRegistry:
             "server_time": server_time,
             "estimator": self._settings.estimator,
             "phones": [self._phone(p, now) for p in self._profiles],
-            "drone": None,
+            "drone": self._drone_view(now),
         }

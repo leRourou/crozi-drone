@@ -61,6 +61,7 @@ dependencies = [
     { name = "audio-capture" },
     { name = "distance-estimation" },
     { name = "fastapi" },
+    { name = "localization" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -69,6 +70,7 @@ requires-dist = [
     { name = "audio-capture", editable = "packages/audio-capture" },
     { name = "distance-estimation", editable = "packages/distance-estimation" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "localization", editable = "packages/localization" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 

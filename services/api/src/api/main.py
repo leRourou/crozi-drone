@@ -8,6 +8,7 @@ import contextlib
 import logging
 import os
 import time
+from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from fastapi import FastAPI, WebSocket
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from api.fusion import TruthFn, run_fusion
 from api.logfmt import kv, short_browser
 from api.profiles import Profile, load_profiles
 from api.settings import Settings, load_settings
@@ -57,6 +59,7 @@ class Estimation:
 
     estimator: DistanceEstimator
     window_frames: int
+    truth: TruthFn | None = None  # position vraie du drone, en simulation seulement
 
 
 def make_estimation(settings: Settings, profiles: tuple[Profile, ...]) -> Estimation | None:
@@ -75,7 +78,7 @@ def make_estimation(settings: Settings, profiles: tuple[Profile, ...]) -> Estima
     scripted = ScriptedEstimator(
         positions, trajectory, settings.scripted_range_m, settings.scripted_uncertainty
     )
-    return Estimation(scripted, settings.window_frames)
+    return Estimation(scripted, settings.window_frames, scripted.drone_position)
 
 
 def _recorder_for(hello: Hello) -> WavRecorder | None:
@@ -337,7 +340,17 @@ def create_app(
     async def state_stream(ws: WebSocket) -> None:
         await _serve_state(ws, registry, settings.state_period_s)
 
-    application = FastAPI(title="Crozidrone audio stream")
+    @contextlib.asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        """③ tourne en tâche de fond tant qu'un estimateur produit des distances."""
+        fusion = None
+        if estimation is not None:
+            fusion = asyncio.create_task(run_fusion(registry, settings, estimation.truth))
+        yield
+        if fusion is not None:
+            fusion.cancel()
+
+    application = FastAPI(title="Crozidrone audio stream", lifespan=lifespan)
     application.add_api_websocket_route("/ws/audio", audio_stream)
     application.add_api_websocket_route("/ws/state", state_stream)
     if front_dir is not None:

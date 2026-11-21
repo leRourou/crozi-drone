@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import math
 import wave
 
 import pytest
@@ -264,6 +265,35 @@ def test_the_scripted_estimator_reports_a_detection_per_received_window():
             detection = phone_state(client, "tristan")["detection"]
     assert detection["fresh"] is True
     assert detection["drone"] is (detection["distance_m"] is not None)
+
+
+def test_three_listening_phones_locate_the_simulated_drone():
+    # Portée immense : les trois téléphones entendent toujours le drone virtuel.
+    app = fresh_app(estimator="scripted", state_period_ms=20, scripted_range_m=1000.0)
+    with TestClient(app) as client:
+        sockets = [client.websocket_connect("/ws/audio") for _ in range(3)]
+        for ws, profile in zip(sockets, ["noe", "tristan", "maxence"], strict=True):
+            ws.__enter__()
+            open_session(ws, make_hello(profile=profile))
+            send_audio(ws, sine(seconds=0.25))
+            ws.send_text(json.dumps({"type": "ping", "t": 1}))
+            receive_until(ws, "pong")
+        with client.websocket_connect("/ws/state") as state_ws:
+            drone = None
+            for _ in range(50):
+                drone = state_ws.receive_json()["drone"]
+                if drone["status"] == "located":
+                    break
+        for ws in sockets:
+            ws.__exit__(None, None, None)
+    assert (drone["status"], drone["detecting"]) == ("located", 3)
+    truth, zone = drone["truth"], drone["zone"]
+    assert math.dist((truth["x_m"], truth["y_m"]), (zone["x_m"], zone["y_m"])) < 3.0
+
+
+def test_without_estimator_the_state_has_no_drone_view(client):
+    with client.websocket_connect("/ws/state") as ws:
+        assert ws.receive_json()["drone"] is None
 
 
 def test_state_is_pushed_every_state_period():

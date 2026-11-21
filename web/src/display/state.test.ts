@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { message, phone } from "./fakes";
+import { droneView, message, phone } from "./fakes";
 import { parseState } from "./state";
 
 const raw = (obj: unknown) => JSON.stringify(obj);
@@ -22,6 +22,12 @@ describe("parseState", () => {
       detection: { drone: false, distance_m: null, uncertainty_rel: null, age_s: 1, fresh: true },
     });
     expect(parseState(raw(message({ phones: [offline, noDrone] })))?.phones).toEqual([offline, noDrone]);
+  });
+
+  it("parses the drone view: located with a zone, or another status without", () => {
+    expect(parseState(raw(message({ drone: droneView() }))) ?.drone).toEqual(droneView());
+    const waiting = droneView({ status: "insufficient", detecting: 2, zone: null, truth: null });
+    expect(parseState(raw(message({ drone: waiting })))?.drone).toEqual(waiting);
   });
 
   it.each([
@@ -55,7 +61,21 @@ describe("parseState", () => {
     ["a drone without uncertainty", raw(message({ phones: [phone({ detection: { drone: true, distance_m: 3, uncertainty_rel: null, age_s: 0, fresh: true } })] }))],
     ["no drone but an uncertainty", raw(message({ phones: [phone({ detection: { drone: false, distance_m: null, uncertainty_rel: 0.1, age_s: 0, fresh: true } })] }))],
     ["a non-boolean drone flag", raw(message({ phones: [phone({ detection: { drone: "yes", distance_m: null, uncertainty_rel: null, age_s: 0, fresh: true } })] }))],
-    ["a non-null drone position (③ not wired)", raw(message({ drone: { x: 1 } }))],
+    ["a drone view that is not an object", raw(message({ drone: "here" }))],
+    ["an unknown drone status", raw(message({ drone: droneView({ status: "lost" }) }))],
+    ["a located drone without zone", raw(message({ drone: droneView({ zone: null }) }))],
+    ["a zone without location", raw(message({ drone: droneView({ status: "insufficient" }) }))],
+    ["a non-numeric detecting count", raw(message({ drone: droneView({ detecting: "3" }) }))],
+    ["a drone view without age", raw(message({ drone: droneView({ age_s: null }) }))],
+    ["a zone with a missing field", raw(message({ drone: droneView({ zone: { x_m: 1, y_m: 2 } }) }))],
+    [
+      "a zone with a non-boolean degraded flag",
+      raw(message({ drone: droneView({ zone: { ...droneView().zone, degraded: "no" } }) })),
+    ],
+    ["a true position without x", raw(message({ drone: droneView({ truth: { y_m: 1, z_m: 1 } }) }))],
+    ["a true position without y", raw(message({ drone: droneView({ truth: { x_m: 1, z_m: 1 } }) }))],
+    ["a true position without z", raw(message({ drone: droneView({ truth: { x_m: 1, y_m: 1 } }) }))],
+    ["an unknown drone status without zone", raw(message({ drone: droneView({ status: "lost", zone: null }) }))],
   ])("rejects %s", (_name, text) => {
     expect(parseState(text)).toBeUndefined();
   });
