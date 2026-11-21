@@ -139,6 +139,29 @@ describe("Streamer", () => {
     expect(granted[1]).toMatch(/ gap_ms=250$/);
   });
 
+  it("stops cleanly with network_too_slow once more than 5 s of audio waits in the socket", async () => {
+    const env = setup();
+    env.streamer.start("axel");
+    await connect(env);
+    env.sockets[0].bufferedAmount = 480_000; // exactement 5 s : toléré
+    env.captures[0].chunk(new Int16Array(2400));
+    expect(env.captures[0].stopCalls).toBe(0);
+    env.sockets[0].bufferedAmount = 480_001;
+    env.captures[0].chunk(new Int16Array(2400)); // déclenche l'arrêt
+    const digest = sha(env.captures[0].pcmBytes());
+    env.captures[0].chunk(new Int16Array(2400)); // arrive pendant l'arrêt : pas de second arrêt
+    await tick();
+    expect(env.captures[0].stopCalls).toBe(1);
+    const warnings = env.logs.filter((l) => l.text.startsWith("network_too_slow"));
+    expect(warnings).toEqual([{ text: expect.stringMatching(/buffered=480001B/), level: "warn" }]);
+    expect(env.sockets[0].texts().at(-1)).toEqual({
+      type: "end",
+      reason: "network_too_slow",
+      frames: 4800,
+      pcm_sha256: digest,
+    });
+  });
+
   it("a module error ends the session explicitly, without hash and without restart", async () => {
     const env = setup();
     env.streamer.start("axel");

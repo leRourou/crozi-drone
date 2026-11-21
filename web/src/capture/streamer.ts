@@ -18,6 +18,8 @@ import type { ProfileId } from "./profiles";
 export const PROTOCOL = "crozidrone.audio-stream.v1";
 const WAV_HEADER_BYTES = 44;
 const PING_PERIOD_MS = 2000;
+/** Au-delà de ~5 s d'audio en attente dans la WebSocket, le réseau ne suit plus le temps réel. */
+const MAX_BUFFERED_BYTES = 5 * 48_000 * 2;
 
 export type LogLevel = "info" | "warn" | "error";
 export type State = "idle" | "starting" | "streaming" | "error";
@@ -52,7 +54,8 @@ export interface StreamerEvents {
   level: (peak: number) => void;
 }
 
-type Outcome = StopReason | "error" | "disconnect";
+type EndReason = StopReason | "network_too_slow";
+type Outcome = EndReason | "error" | "disconnect";
 
 interface ServerStats {
   packets_per_s: number;
@@ -179,8 +182,21 @@ class Session {
   private contract: Omit<Status, "state"> = {};
 
   private sendPacket(packet: ArrayBuffer): void {
-    if (this.ready) this.socket.send(packet);
-    else this.queue.push(packet);
+    if (!this.ready) {
+      this.queue.push(packet);
+      return;
+    }
+    this.socket.send(packet);
+    if (this.socket.bufferedAmount > MAX_BUFFERED_BYTES && !this.tooSlow) this.stopTooSlow();
+  }
+
+  private tooSlow = false;
+
+  /** Arrêt propre : le module produit son WAV, end porte le hash, end_ack fait foi. */
+  private stopTooSlow(): void {
+    this.tooSlow = true;
+    this.events.log(`network_too_slow buffered=${this.socket.bufferedAmount}B — arrêt de la session`, "warn");
+    void this.capture.stop("manual");
   }
 
   private receive(text: string): void {
@@ -216,9 +232,10 @@ class Session {
 
   private pendingOutcome: Outcome = "manual";
 
-  private async end(result: CaptureResult, reason: StopReason): Promise<void> {
+  private async end(result: CaptureResult, stopReason: StopReason): Promise<void> {
     this.packetizer.flush();
     const digest = await this.deps.sha256Hex(result.wavBytes.subarray(WAV_HEADER_BYTES));
+    const reason: EndReason = this.tooSlow ? "network_too_slow" : stopReason;
     this.pendingOutcome = reason;
     this.socket.send(JSON.stringify({ type: "end", reason, frames: result.frameCount, pcm_sha256: digest }));
   }
