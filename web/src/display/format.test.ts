@@ -8,6 +8,7 @@ import {
   levelText,
   metres,
   statusLabel,
+  speedText,
   truthErrorText,
   zoneText,
 } from "./format";
@@ -102,13 +103,29 @@ describe("zone texts", () => {
   });
 });
 
+describe("track texts", () => {
+  const track = drone().track!;
+
+  it("gives the filtered position with its radius, like a zone", () => {
+    expect(zoneText(track)).toBe("x 3,0 m · y 8,1 m · ± 0,4 m");
+    expect(altitudeText(track)).toBe("1,5 m (1,2 à 1,8 m)");
+  });
+
+  it("gives the horizontal speed", () => {
+    expect(speedText(track)).toBe("0,5 m/s");
+  });
+});
+
 describe("truthErrorText", () => {
-  it("measures the gap between the computed centre and the simulated drone", () => {
-    expect(truthErrorText(drone({ zone: { ...drone().zone, x_m: 3.0, y_m: 8.5 } }))).toBe("0,5 m");
+  const truth = drone().truth;
+
+  it("measures the gap between a computed position and the simulated drone", () => {
+    expect(truthErrorText(truth, { x_m: 3.0, y_m: 8.5 })).toBe("0,5 m");
+    expect(truthErrorText(truth, { x_m: 3.3, y_m: 8.4 })).toBe("0,5 m");
   });
 
   it("is absent without simulation or without position", () => {
-    expect(truthErrorText(drone({ truth: null }))).toBeNull();
-    expect(truthErrorText(drone({ status: "insufficient", zone: null }))).toBeNull();
+    expect(truthErrorText(null, drone().zone)).toBeNull();
+    expect(truthErrorText(truth, null)).toBeNull();
   });
 });

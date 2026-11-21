@@ -43,6 +43,18 @@ export interface Zone {
   readonly degraded: boolean;
 }
 
+/** Piste du drone (③, filtre de Kalman) : position lissée, vitesse horizontale, disque à 2 σ. */
+export interface Track {
+  readonly x_m: number;
+  readonly y_m: number;
+  readonly z_m: number;
+  readonly vx_mps: number;
+  readonly vy_mps: number;
+  readonly radius_m: number;
+  readonly z_min_m: number;
+  readonly z_max_m: number;
+}
+
 export interface Point3 {
   readonly x_m: number;
   readonly y_m: number;
@@ -53,6 +65,8 @@ interface DroneBase {
   /** Téléphones dont les détections récentes ont été combinées. */
   readonly detecting: number;
   readonly age_s: number;
+  /** Piste filtrée, indépendante du statut (peut exister avec 1 ou 2 téléphones) ; null sans piste. */
+  readonly track: Track | null;
   /** Position vraie du drone simulé (DISTANCE_ESTIMATOR=scripted) ; null sinon. */
   readonly truth: Point3 | null;
 }
@@ -77,6 +91,7 @@ const STATUSES: readonly unknown[] = ["streaming", "stale", "offline", "never_se
 const ESTIMATORS: readonly unknown[] = ["none", "scripted"];
 const DRONE_STATUSES: readonly unknown[] = ["located", "insufficient", "no_detection", "inconsistent"];
 const ZONE_NUMBERS = ["x_m", "y_m", "radius_m", "z_m", "z_min_m", "z_max_m", "tolerance"] as const;
+const TRACK_NUMBERS = ["x_m", "y_m", "z_m", "vx_mps", "vy_mps", "radius_m", "z_min_m", "z_max_m"] as const;
 
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 const isNum = (v: unknown): v is number => typeof v === "number"; // JSON n'a ni NaN ni Infinity
@@ -94,14 +109,21 @@ function isZone(z: unknown): boolean {
   return isObj(z) && ZONE_NUMBERS.every((k) => isNum(z[k])) && typeof z.degraded === "boolean";
 }
 
+function isTrack(t: unknown): boolean {
+  return t === null || (isObj(t) && TRACK_NUMBERS.every((k) => isNum(t[k])));
+}
+
 function isPoint3(p: unknown): boolean {
   return isObj(p) && isNum(p.x_m) && isNum(p.y_m) && isNum(p.z_m);
 }
 
+const isDroneHeader = (d: Obj) => DRONE_STATUSES.includes(d.status) && isNum(d.detecting) && isNum(d.age_s);
+
+const isDronePositions = (d: Obj) => (d.truth === null || isPoint3(d.truth)) && isTrack(d.track);
+
 function isDroneView(d: unknown): boolean {
   if (d === null) return true;
-  if (!isObj(d) || !DRONE_STATUSES.includes(d.status) || !isNum(d.detecting) || !isNum(d.age_s)) return false;
-  if (d.truth !== null && !isPoint3(d.truth)) return false;
+  if (!isObj(d) || !isDroneHeader(d) || !isDronePositions(d)) return false;
   return d.status === "located" ? isZone(d.zone) : d.zone === null;
 }
 

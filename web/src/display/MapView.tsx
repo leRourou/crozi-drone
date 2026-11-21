@@ -97,6 +97,7 @@ export function MapView({ state, selected, onSelect }: Props) {
   const drone = state.drone;
   const rings = rangeRings(state.phones);
   const droneSelected = selected?.kind === "drone";
+  const marker = drone?.track ?? drone?.zone; // la piste filtrée si elle existe, sinon la zone brute
   return (
     <svg className="map" viewBox={VIEWBOX} role="img" aria-label="Plan de salle : téléphones et drone">
       <defs>
@@ -118,8 +119,12 @@ export function MapView({ state, selected, onSelect }: Props) {
           </g>
         ))}
       </g>
+      {/* Zone brute (localiser_drone, un calcul par tick) en pâle sous la piste filtrée. */}
       {drone?.zone && (
-        <circle cx={drone.zone.x_m} cy={drone.zone.y_m} r={drone.zone.radius_m} className="zone" />
+        <circle cx={drone.zone.x_m} cy={drone.zone.y_m} r={drone.zone.radius_m} className={`zone ${drone.track ? "raw" : ""}`} />
+      )}
+      {drone?.track && (
+        <circle cx={drone.track.x_m} cy={drone.track.y_m} r={drone.track.radius_m} className="zone" data-track="" />
       )}
       {drone?.truth && (
         <Clickable label="Drone simulé (position vraie)" selected={droneSelected} onSelect={() => onSelect({ kind: "drone" })} className="drone-marker ghost" x={drone.truth.x_m} y={drone.truth.y_m}>
@@ -127,8 +132,8 @@ export function MapView({ state, selected, onSelect }: Props) {
         </Clickable>
       )}
       {/* Drone avant les téléphones : un téléphone survolé reste visible et cliquable. */}
-      {drone?.zone && (
-        <Clickable label="Drone (position calculée)" selected={droneSelected} onSelect={() => onSelect({ kind: "drone" })} className="drone-marker" x={drone.zone.x_m} y={drone.zone.y_m} data={{ "data-drone": "located" }}>
+      {marker && (
+        <Clickable label="Drone (position calculée)" selected={droneSelected} onSelect={() => onSelect({ kind: "drone" })} className="drone-marker" x={marker.x_m} y={marker.y_m} data={{ "data-drone": drone?.track ? "tracked" : "located" }}>
           <circle r={0.75} className="selection" />
           <g transform={`scale(${PX})`}><DroneIcon /></g>
         </Clickable>

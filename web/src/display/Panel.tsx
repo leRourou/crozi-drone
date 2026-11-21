@@ -7,6 +7,7 @@ import {
   levelText,
   metres,
   statusLabel,
+  speedText,
   truthErrorText,
   zoneText,
 } from "./format";
@@ -60,7 +61,9 @@ function PhoneDetails({ phone, estimator }: { phone: PhoneState; estimator: Esti
 }
 
 function DroneDetails({ drone, estimator }: { drone: DroneView | null; estimator: EstimatorName }) {
-  const error = drone && truthErrorText(drone);
+  const truth = drone?.truth ?? null;
+  const trackError = truthErrorText(truth, drone?.track ?? null);
+  const zoneError = truthErrorText(truth, drone?.zone ?? null);
   return (
     <section className="details" aria-label="Détails : drone">
       <h2>
@@ -68,7 +71,10 @@ function DroneDetails({ drone, estimator }: { drone: DroneView | null; estimator
       </h2>
       <dl>
         <Row label="État">{droneStatusText(drone, estimator)}</Row>
-        {drone?.zone && <Row label="Position">{zoneText(drone.zone)}</Row>}
+        {drone?.track && <Row label="Position filtrée">{zoneText(drone.track)}</Row>}
+        {drone?.track && <Row label="Altitude filtrée">{altitudeText(drone.track)}</Row>}
+        {drone?.track && <Row label="Vitesse">{speedText(drone.track)}</Row>}
+        {drone?.zone && <Row label="Position brute">{zoneText(drone.zone)}</Row>}
         {drone?.zone && <Row label="Altitude">{altitudeText(drone.zone)}</Row>}
         {drone?.zone && (
           <Row label="Tolérance">
@@ -81,7 +87,8 @@ function DroneDetails({ drone, estimator }: { drone: DroneView | null; estimator
             x {metres(drone.truth.x_m)} · y {metres(drone.truth.y_m)} · z {metres(drone.truth.z_m)}
           </Row>
         )}
-        {error && <Row label="Écart calcul / simulé">{error}</Row>}
+        {trackError && <Row label="Écart filtré / simulé">{trackError}</Row>}
+        {zoneError && <Row label="Écart brut / simulé">{zoneError}</Row>}
       </dl>
     </section>
   );

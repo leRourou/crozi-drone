@@ -90,6 +90,7 @@ main.display h1 {
 .ring.old { opacity: 0.35; }
 
 .zone { fill: var(--drone); fill-opacity: 0.15; stroke: var(--drone); stroke-width: 0.04; stroke-dasharray: 0.12 0.08; }
+.zone.raw { fill-opacity: 0.05; stroke-opacity: 0.35; }
 
 [role="button"] { cursor: pointer; outline: none; }
 .map .selection { fill: none; stroke: var(--text); stroke-width: 0.05; opacity: 0; }

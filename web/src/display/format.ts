@@ -1,5 +1,9 @@
 /** Textes affichés par la page d'état (aucun calcul de domaine : tout vient du serveur). */
-import type { Detection, DroneView, EstimatorName, PhoneStatus, Zone } from "./state";
+import type { Detection, DroneView, EstimatorName, PhoneStatus, Point3, Zone } from "./state";
+
+type Disc = Pick<Zone, "x_m" | "y_m" | "radius_m">;
+type Altitude = Pick<Zone, "z_m" | "z_min_m" | "z_max_m">;
+type Planar = Pick<Zone, "x_m" | "y_m">;
 
 const STATUS_LABELS: Record<PhoneStatus, string> = {
   streaming: "À l'écoute",
@@ -53,16 +57,22 @@ export function droneStatusText(drone: DroneView | null, estimator: EstimatorNam
   }
 }
 
-export function zoneText(zone: Zone): string {
+/** Zone brute ou piste filtrée : centre et rayon. */
+export function zoneText(zone: Disc): string {
   return `x ${metres(zone.x_m)} · y ${metres(zone.y_m)} · ± ${metres(zone.radius_m)}`;
 }
 
-export function altitudeText(zone: Zone): string {
+export function altitudeText(zone: Altitude): string {
   return `${metres(zone.z_m)} (${metres(zone.z_min_m).slice(0, -2)} à ${metres(zone.z_max_m)})`;
 }
 
-/** Écart horizontal entre le centre calculé et le drone simulé ; null hors simulation ou sans position. */
-export function truthErrorText(drone: DroneView): string | null {
-  if (drone.truth === null || drone.zone === null) return null;
-  return metres(Math.hypot(drone.zone.x_m - drone.truth.x_m, drone.zone.y_m - drone.truth.y_m));
+/** Vitesse horizontale de la piste. */
+export function speedText(track: { readonly vx_mps: number; readonly vy_mps: number }): string {
+  return `${Math.hypot(track.vx_mps, track.vy_mps).toFixed(1).replace(".", ",")} m/s`;
+}
+
+/** Écart horizontal entre une position calculée et le drone simulé ; null hors simulation ou sans position. */
+export function truthErrorText(truth: Point3 | null, at: Planar | null): string | null {
+  if (truth === null || at === null) return null;
+  return metres(Math.hypot(at.x_m - truth.x_m, at.y_m - truth.y_m));
 }

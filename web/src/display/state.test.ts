@@ -30,6 +30,13 @@ describe("parseState", () => {
     expect(parseState(raw(message({ drone: waiting })))?.drone).toEqual(waiting);
   });
 
+  it("parses the drone track independently of the status, or its absence", () => {
+    const trackOnly = droneView({ status: "insufficient", detecting: 1, zone: null });
+    expect(parseState(raw(message({ drone: trackOnly })))?.drone).toEqual(trackOnly);
+    const noTrack = droneView({ track: null });
+    expect(parseState(raw(message({ drone: noTrack })))?.drone).toEqual(noTrack);
+  });
+
   it.each([
     ["not JSON", "{"],
     ["another message type", raw(message({ type: "stats" }))],
@@ -75,6 +82,10 @@ describe("parseState", () => {
     ["a true position without x", raw(message({ drone: droneView({ truth: { y_m: 1, z_m: 1 } }) }))],
     ["a true position without y", raw(message({ drone: droneView({ truth: { x_m: 1, z_m: 1 } }) }))],
     ["a true position without z", raw(message({ drone: droneView({ truth: { x_m: 1, y_m: 1 } }) }))],
+    ["a drone view without track", raw(message({ drone: droneView({ track: undefined }) }))],
+    ["a track that is not an object", raw(message({ drone: droneView({ track: "here" }) }))],
+    ["a track with a missing speed", raw(message({ drone: droneView({ track: { ...droneView().track, vy_mps: undefined } }) }))],
+    ["a track with a non-numeric radius", raw(message({ drone: droneView({ track: { ...droneView().track, radius_m: "1" } }) }))],
     ["an unknown drone status without zone", raw(message({ drone: droneView({ status: "lost", zone: null }) }))],
   ])("rejects %s", (_name, text) => {
     expect(parseState(text)).toBeUndefined();
