@@ -106,7 +106,7 @@ l'ordre de `contracts/profiles.json`. Les messages du client sont ignorés.
 
 `detection` vaut `null` sans estimateur (`estimator: "none"`) ou avant la première fenêtre complète
 (`scripted` : `DISTANCE_WINDOW_MS`, 250 ms par défaut, fenêtres contiguës ; `model` : une estimation par
-pas de la release, voir plus bas).
+période `MODEL_PERIOD_MS`, voir plus bas).
 Sinon : `{"drone": bool, "distance_m": float|null, "uncertainty_rel": float|null, "age_s": float,
 "fresh": bool}`. `distance_m` et `uncertainty_rel` ne sont présents que si `drone` est vrai.
 `fresh` est vrai si la détection a ≤ `DETECTION_FRESH_MS` (2 s par défaut).
@@ -136,9 +136,10 @@ virtuel sur une trajectoire connue) ou `model` (vrai modèle, release du repo ML
 | `SCRIPTED_UNCERTAINTY` | 0.10 | incertitude relative annoncée avec chaque distance |
 | `DISTANCE_MODEL_REPO` | — | `model` : repo Hugging Face des releases (ex. `ImAPancake/EDTH_ml_models`) |
 | `DISTANCE_MODEL_REVISION` | — | `model` : sha de commit HF à 40 caractères, épinglé (jamais une branche) |
-| `DISTANCE_MODEL_RELEASE` | — | `model` : dossier de la release dans le repo (ex. `edth.audio.24k-1s.r0`) ; le manifeste doit porter ce nom |
+| `DISTANCE_MODEL_RELEASE` | — | `model` : dossier de la release dans le repo (ex. `edth.audio.48k-w100.r1`) ; le manifeste doit porter ce nom |
 | `DISTANCE_MODEL_DIR` | — | `model` : bundle local (dev, hors ligne) ; prioritaire, les trois variables précédentes sont alors inutiles |
 | `MODEL_UNCERTAINTY` | 0.10 | `model` : incertitude relative annoncée avec chaque distance (le contrat ML la laisse à l'appli) |
+| `MODEL_PERIOD_MS` | 100 | `model` : cadence des estimations, multiple du pas de la release (r1 : 20 ms) ; le modèle n'évalue que la dernière fenêtre de chaque période |
 | `HF_TOKEN` | — | jeton Hugging Face (repo privé) ; jamais journalisé |
 | `SCRIPTED_NOISE` | 0 | écart-type relatif d'un bruit gaussien sur chaque distance (0 = exacte ; 0.05 ≈ 95 % des distances dans ± 10 %). La détection reste décidée sur la vraie distance. |
 
@@ -147,29 +148,41 @@ réels (point décimal). Une valeur invalide empêche le serveur
 de démarrer (message d'erreur nommant la variable).
 ### Vrai modèle : `DISTANCE_ESTIMATOR=model`
 
-Contrat d'intégration ML V1 (Outline « Contrat d'intégration ML V1 — bundle de release, manifeste et
-inférence live »). Une release est un dossier : `manifest.json` (`edth.model-release.v1`), `frozen/dsp.py`
-et `frozen/ml.py`, `detection/` et `distance/model.joblib`, `parity/fixture.json`.
+Contrat d'intégration ML v2 (Outline « Contrat d'intégration ML — bundle de release, manifeste et
+inférence live »). Une release est un dossier : `manifest.json` (`edth.model-release.v2`), `frozen/`
+(`dsp.py`, `features.py`, `ml.py`), `detection/` et `distance/model.joblib`, `parity/fixture.json`.
+Release en service : `edth.audio.48k-w100.r1` (48 kHz natif sans FIR, fenêtres de 100 ms toutes les
+20 ms, 50 niveaux de bandes, détection et distance par MLP). La r0 (contrat v1) n'est plus chargeable.
 
 - **Chargement au démarrage** : `DISTANCE_MODEL_DIR`, sinon téléchargement du seul dossier
   `DISTANCE_MODEL_RELEASE` du repo à la révision épinglée (cache `HF_HOME`). Pour tirer la release au
   déploiement plutôt qu'au premier démarrage : `python -m api.model_fetch` (mêmes variables).
-- **Refus, jamais de repli sur le mock** : contrat inconnu, transport autre que 48 kHz mono s16le, taux
-  inconnu de `dsp.py`, empreinte FIR différente, fenêtres qui ne finissent pas sur le pas, seuil hors
-  ]0, 1[, `frozen/*.py` différents de `packages/features` (vérifié avant de charger les pickles), dossier
-  qui contient une autre release, lot de parité non reproduit. Le serveur ne démarre pas et l'erreur nomme
-  la cause (log `event=model_loaded release=… source=… revision=…` en cas de succès).
+- **Refus, jamais de repli sur le mock** : contrat autre que v2, transport autre que 48 kHz mono s16le,
+  taux inconnu de `dsp.py`, FIR annoncé différent de celui de `dsp.py` (`null` à 48 kHz), fenêtres qui
+  ne finissent pas sur le pas, seuil hors ]0, 1[, `features.local_only` faux, argument de
+  `features.recompute` inconnu de `dsp.window_features` ou groupe de bandes inconnu, `columns` du
+  manifeste différentes de celles des pickles, `frozen/*.py` différents de `packages/features` (vérifié
+  avant de charger les pickles), dossier qui contient une autre release, `MODEL_PERIOD_MS` qui n'est pas
+  un multiple du pas, lot de parité non reproduit. Le serveur ne démarre pas et l'erreur nomme la cause
+  (log `event=model_loaded release=… source=… revision=… period_ms=…` en cas de succès).
 - **Parité** : chaque cas du lot (une session : amorce 500 ms + une fenêtre) est rejoué par le chemin
-  live et doit redonner la fenêtre décimée à l'octet près, les features et le logmel à 1e-9, le score à
-  1e-6 et la même présence (la distance n'est comparée que si le drone est présent).
-- **Chemin live** (par session, état neuf à chaque session) : décimation continue (état FIR conservé),
-  fenêtres glissantes sur le flux décimé (r0 : 1 s, pas de 250 ms), contrôle qualité sur le flux 48 kHz
-  (suite de zéros exacts ≥ 40 ms → fenêtres touchées et garde de 500 ms exclues). Chaque bloc reçu d'un
-  pas donne une `detection` : fenêtre non analysable (amorce, coupure) ou score < seuil → `drone: false` ;
-  sinon `distance_m` (bornée par le modèle à [1, 5] m) et `MODEL_UNCERTAINTY`. Motif d'une fenêtre non
-  analysable journalisé à chaque changement (`event=model_window_skipped profile=… reason=warmup|dropout`).
+  live et doit redonner la fenêtre (après décimation éventuelle) à l'octet près, la même recette
+  (`window_ms`, `recompute`), les features à 1e-9, le score à 1e-6 et la même présence (la distance n'est
+  comparée que si le drone est présent).
+- **Chemin live** (par session, état neuf à chaque session) : décimation continue si le taux modèle
+  l'exige (état FIR conservé ; aucune à 48 kHz), fenêtres glissantes (r1 : 100 ms, pas de 20 ms),
+  features recalculées par `dsp.window_features(…, window_ms, **recompute)`, contrôle qualité sur le flux
+  48 kHz (suite de zéros exacts ≥ 40 ms → fenêtres touchées et garde de 500 ms exclues).
+- **Cadence (`MODEL_PERIOD_MS`, réglage de l'appli, 100 ms par défaut)** : le serveur reçoit des blocs
+  d'une période et n'évalue que la dernière fenêtre de chacun ; décimation et contrôle qualité voient
+  tous les échantillons, les fenêtres évaluées sont donc celles du hors ligne. Chaque période donne une
+  `detection` : fenêtre non analysable (amorce, coupure) ou score < seuil → `drone: false` ; sinon
+  `distance_m` (bornée par le modèle à [1, 5] m) et `MODEL_UNCERTAINTY`. Mesure (r1, 3 téléphones) :
+  ≈ 13 % d'un cœur à 100 ms, ≈ 65 % à 20 ms (chaque fenêtre). Motif d'une fenêtre non analysable
+  journalisé à chaque changement (`event=model_window_skipped profile=… reason=warmup|dropout`).
 - **Écart causal connu** : une suite de zéros encore trop courte à la fin d'une fenêtre ne l'invalide pas,
-  alors que hors ligne elle est vue en entier.
+  alors que hors ligne elle est vue en entier. En r1 (pas de 20 ms < coupure minimale de 40 ms), cela
+  concerne au plus les deux fenêtres qui finissent dans les 40 premières ms de chaque coupure.
 
 ### `drone` : résultat de ③
 
