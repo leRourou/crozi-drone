@@ -1,7 +1,7 @@
 [project]
 name = "features"
 version = "0.1.0"
-description = "Copie figée du prétraitement et des modèles du repo ML (dsp.py, ml.py), importés tels quels"
+description = "Copie figée du code d'inférence de la release ML (dsp.py, features.py, ml.py), importée telle quelle"
 requires-python = ">=3.11"
 # Versions alignées sur drone_triangularisation_ia (requirements.txt, torch du README) :
 # les pickles joblib des releases doivent se recharger à l'identique.
@@ -10,6 +10,7 @@ dependencies = [
     "pandas>=2.2,<3",
     "scikit-learn>=1.5,<1.9",
     "joblib>=1.4,<2",
+    "scipy>=1.11",  # features.py (scipy.signal) ; déjà tiré par scikit-learn
     "torch==2.8.0",
 ]
 
@@ -21,11 +22,11 @@ name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
-# Deux modules top-level d'un seul fichier : un pickle référence ses classes sous le nom `ml`
+# Trois modules top-level d'un seul fichier : un pickle référence ses classes sous le nom `ml`
 # (ml.CnnPresence, ml.Mlp). uv_build n'accepte que des packages (dossier/__init__.py) : hatchling.
 [tool.hatch.build.targets.wheel]
 sources = ["src"]
-only-include = ["src/dsp.py", "src/ml.py"]
+only-include = ["src/dsp.py", "src/features.py", "src/ml.py"]
 
 [build-system]
 requires = ["hatchling>=1.25"]

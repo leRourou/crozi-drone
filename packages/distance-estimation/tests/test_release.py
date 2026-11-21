@@ -1,4 +1,4 @@
-"""Chargement d'un bundle de release (contrat d'intégration ML V1) : validé, sinon refusé."""
+"""Chargement d'un bundle de release (contrat d'intégration ML v2) : validé, sinon refusé."""
 
 import base64
 import json
@@ -32,13 +32,19 @@ def refused(bundle, match):
 def test_a_valid_bundle_gives_its_name_windowing_and_threshold(model_bundle):
     release = load_release(model_bundle)
     manifest = json.loads((model_bundle / "manifest.json").read_text())
-    assert release.name == "test.24k-1s.r0"
-    assert release.windowing == Windowing(24000, 24000, 6000, 12000, 1920, 24000)
+    assert release.name == "test.48k-w100.r0"
+    assert release.windowing == Windowing(48000, 4800, 960, 24000, 1920, 24000)
     assert release.threshold == manifest["detection"]["threshold"]
+    assert (release.window_ms, release.recompute) == (100, manifest["features"]["recompute"])
 
 
 def test_an_unknown_contract_is_refused(bundle):
-    edit(bundle, "manifest.json", lambda m: m.update(contract="edth.model-release.v2"))
+    edit(bundle, "manifest.json", lambda m: m.update(contract="edth.model-release.v3"))
+    refused(bundle, "contract")
+
+
+def test_a_v1_release_is_refused_since_the_loader_follows_contract_v2(bundle):
+    edit(bundle, "manifest.json", lambda m: m.update(contract="edth.model-release.v1"))
     refused(bundle, "contract")
 
 
@@ -52,9 +58,37 @@ def test_a_model_rate_unknown_to_the_frozen_dsp_is_refused(bundle):
     refused(bundle, "model_rate_hz")
 
 
-def test_a_fir_fingerprint_that_does_not_match_the_frozen_dsp_is_refused(bundle):
-    edit(bundle, "manifest.json", lambda m: m["input"]["fir"].update(coefficients_sha256="0" * 64))
+def test_a_fir_announced_at_48_khz_where_the_frozen_dsp_filters_nothing_is_refused(bundle):
+    fir = {"coefficients_sha256": "0" * 64}
+    edit(bundle, "manifest.json", lambda m: m["input"].update(fir=fir))
     refused(bundle, "FIR")
+
+
+def test_no_fir_at_a_rate_where_the_frozen_dsp_filters_is_refused():
+    with pytest.raises(ValueError, match="FIR"):
+        parse_manifest(manifest_with(lambda m: m["input"].update(model_rate_hz=24000)))
+
+
+def test_a_release_whose_features_are_not_window_local_is_refused(bundle):
+    edit(bundle, "manifest.json", lambda m: m["features"].update(local_only=False))
+    refused(bundle, "local_only")
+
+
+def test_a_recompute_argument_unknown_to_window_features_is_refused(bundle):
+    edit(bundle, "manifest.json", lambda m: m["features"]["recompute"].update(per_take=True))
+    refused(bundle, "per_take")
+
+
+def test_a_band_group_unknown_to_the_frozen_dsp_is_refused(bundle):
+    edit(bundle, "manifest.json",
+         lambda m: m["features"]["recompute"].update(band_level_group="band_levels_avg7"))
+    refused(bundle, "band_levels_avg7")
+
+
+@pytest.mark.parametrize("model", ["detection", "distance"])
+def test_columns_that_are_not_the_pickled_model_columns_are_refused(bundle, model):
+    edit(bundle, "manifest.json", lambda m: m[model]["columns"].reverse())
+    refused(bundle, f"{model}.columns")
 
 
 def test_window_samples_inconsistent_with_their_duration_are_refused(bundle):
@@ -63,7 +97,7 @@ def test_window_samples_inconsistent_with_their_duration_are_refused(bundle):
 
 
 def test_windows_not_aligned_on_the_step_are_refused(bundle):
-    edit(bundle, "manifest.json", lambda m: m["input"]["qc"].update(start_guard_ms=100))
+    edit(bundle, "manifest.json", lambda m: m["input"]["qc"].update(start_guard_ms=10))
     refused(bundle, "pas")
 
 
@@ -91,7 +125,7 @@ def test_a_bundle_of_symlinks_like_the_hugging_face_cache_loads(model_bundle, tm
             link = snapshot / blob.relative_to(blobs)
             link.parent.mkdir(parents=True, exist_ok=True)
             link.symlink_to(blob)
-    assert load_release(snapshot).name == "test.24k-1s.r0"
+    assert load_release(snapshot).name == "test.48k-w100.r0"
 
 
 def test_a_model_file_outside_the_bundle_is_refused(bundle):
@@ -109,9 +143,10 @@ def test_a_frozen_file_that_does_not_match_its_manifest_fingerprint_is_refused(b
     refused(bundle, "frozen/dsp.py")
 
 
-def test_a_release_must_list_both_frozen_files(bundle):
-    edit(bundle, "manifest.json", lambda m: m["frozen"]["files"].pop("frozen/dsp.py"))
-    refused(bundle, "frozen/dsp.py")
+@pytest.mark.parametrize("name", ["frozen/dsp.py", "frozen/features.py", "frozen/ml.py"])
+def test_a_release_must_list_the_three_frozen_files(bundle, name):
+    edit(bundle, "manifest.json", lambda m: m["frozen"]["files"].pop(name))
+    refused(bundle, name)
 
 
 def test_a_bundle_without_parity_set_is_refused(bundle):
@@ -130,11 +165,11 @@ def manifest_with(change):
 
 def test_windows_need_not_be_a_multiple_of_the_step_when_they_end_on_it():
     def change(m):
-        m["input"]["window"].update(step_ms=300, step_samples=7200)
-        m["input"]["qc"].update(start_guard_ms=200)
+        m["input"]["window"].update(step_ms=30, step_samples=1440)
+        m["input"]["qc"].update(start_guard_ms=20)
 
     assert parse_manifest(manifest_with(change)).windowing == Windowing(
-        24000, 24000, 7200, 4800, 1920, 24000
+        48000, 4800, 1440, 960, 1920, 24000
     )
 
 
@@ -169,17 +204,19 @@ def test_a_score_exactly_at_the_threshold_means_a_drone():
         def predict(self, d):
             return np.full(len(d), self.value)
 
-    windowing = parse_manifest(manifest_with(lambda m: None)).windowing
-    release = Release("r", windowing, 0.5, Constant(0.5), Constant(2.5))
-    decision = release.decide(np.ones(windowing.samples, dtype=np.int16))
+    manifest = parse_manifest(manifest_with(lambda m: None))
+    window = np.ones(manifest.windowing.samples, dtype=np.int16)
+
+    def release(score):
+        return Release("r", manifest.windowing, 0.5, Constant(score), Constant(2.5),
+                       manifest.window_ms, manifest.recompute)
+
+    decision = release(0.5).decide(window)
     assert (decision.score, decision.distance_m) == (0.5, 2.5)
-    below = Release("r", windowing, 0.5, Constant(0.4999), Constant(2.5)).decide(
-        np.ones(windowing.samples, dtype=np.int16)
-    )
-    assert below.distance_m is None
+    assert release(0.4999).decide(window).distance_m is None
 
 
-# ---------------------------------------------------------------- lot de parité (format r0)
+# ---------------------------------------------------------------- lot de parité (format v2)
 
 
 def present_case(f):
@@ -190,6 +227,11 @@ def absent_case(f):
     return next(c for c in f["cases"] if not c["expected"]["present"])
 
 
+def nudge_first_feature(flat, delta):
+    first = next(iter(flat))
+    flat[first] += delta
+
+
 def zeroed_pcm(b64):
     return base64.b64encode(bytes(len(base64.b64decode(b64)))).decode()
 
@@ -198,17 +240,20 @@ def zeroed_pcm(b64):
     "change",
     [
         pytest.param(lambda f: present_case(f)["expected"].update(score=0.999), id="score"),
-        pytest.param(lambda f: f["cases"][0]["expected"]["flat"].update(
-            f0=f["cases"][0]["expected"]["flat"]["f0"] + 1e-6), id="tiny-flat-difference"),
-        pytest.param(lambda f: f["cases"][0]["expected"]["logmel"].__setitem__(
-            5, f["cases"][0]["expected"]["logmel"][5] + 1e-3), id="logmel"),
+        pytest.param(lambda f: nudge_first_feature(f["cases"][0]["expected"]["flat"], 1e-6),
+                     id="tiny-flat-difference"),
+        pytest.param(lambda f: f["cases"][0]["expected"]["flat"].update(rms_db=-30.0),
+                     id="feature-not-produced-live"),
+        pytest.param(lambda f: f["cases"][0]["expected"].update(window_ms=1000), id="window-ms"),
+        pytest.param(lambda f: f["cases"][0]["expected"]["recompute"].update(include_rms=True),
+                     id="recompute"),
         pytest.param(lambda f: absent_case(f)["expected"].update(present=True), id="presence"),
         pytest.param(lambda f: present_case(f)["expected"].update(
             distance_m=present_case(f)["expected"]["distance_m"] + 0.01), id="distance"),
         pytest.param(lambda f: f["cases"][0]["expected"].update(
-            window_pcm24_b64=zeroed_pcm(f["cases"][0]["expected"]["window_pcm24_b64"])),
+            window_pcm_b64=zeroed_pcm(f["cases"][0]["expected"]["window_pcm_b64"])),
             id="decimated-window"),
-        pytest.param(lambda f: f["cases"][0]["excerpt"].update(window_start_offset_24k=18000),
+        pytest.param(lambda f: f["cases"][0]["excerpt"].update(window_start_offset=24960),
                      id="window-position"),
     ],
 )
@@ -221,7 +266,7 @@ def test_the_distance_of_an_absent_case_is_not_compared(bundle):
     """La distance n'est produite que si la présence est établie (contrat §4) : hors ligne, le
     lot la donne quand même pour les cas absents, sans que le chemin live ait à la reproduire."""
     edit(bundle, "parity/fixture.json", lambda f: absent_case(f)["expected"].update(distance_m=9.9))
-    assert load_release(bundle).name == "test.24k-1s.r0"
+    assert load_release(bundle).name == "test.48k-w100.r0"
 
 
 def test_an_empty_parity_set_is_refused(bundle):

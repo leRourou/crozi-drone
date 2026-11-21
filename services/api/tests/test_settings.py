@@ -33,6 +33,7 @@ def test_defaults_without_environment():
         model_revision=None,
         model_release=None,
         model_uncertainty=0.10,
+        model_period_ms=100,
         hf_token=None,
     )
 
@@ -115,6 +116,7 @@ def test_window_frames_at_48_khz():
         ({"SCRIPTED_UNCERTAINTY": "0"}, "SCRIPTED_UNCERTAINTY"),
         ({"SCRIPTED_NOISE": "-0.1"}, "SCRIPTED_NOISE"),
         ({"MODEL_UNCERTAINTY": "0"}, "MODEL_UNCERTAINTY"),
+        ({"MODEL_PERIOD_MS": "0"}, "MODEL_PERIOD_MS"),
         ({"DISTANCE_ESTIMATOR": "model"}, "DISTANCE_MODEL_REPO"),
         ({"DISTANCE_ESTIMATOR": "model", "DISTANCE_MODEL_REPO": "team/model"},
          "DISTANCE_MODEL_REVISION"),
@@ -152,11 +154,12 @@ def test_the_model_comes_from_a_pinned_hugging_face_revision():
         "DISTANCE_MODEL_RELEASE": "edth.audio.24k-1s.r0",
         "HF_TOKEN": "hf_secret",
         "MODEL_UNCERTAINTY": "0.2",
+        "MODEL_PERIOD_MS": "40",
     }
     s = load_settings(env)
     assert (s.model_repo, s.model_revision, s.hf_token) == ("team/model", SHA, "hf_secret")
     assert (s.model_release, s.model_dir) == ("edth.audio.24k-1s.r0", None)
-    assert s.model_uncertainty == 0.2
+    assert (s.model_uncertainty, s.model_period_ms) == (0.2, 40)
 
 
 def test_a_local_bundle_needs_no_hugging_face_repo():

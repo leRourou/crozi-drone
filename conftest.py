@@ -60,16 +60,17 @@ def hello():
 
 
 # ---------------------------------------------------------------- bundle de release de test (②)
-# Reproduit ce que l'export du repo ML livrera (contrat d'intégration ML V1) avec la copie figée de
-# dsp.py / ml.py : modèles aux poids aléatoires (pas d'entraînement), lot de parité calculé HORS
-# LIGNE sur le flux entier (dsp.iter_windows), comme la préparation de l'étape 01.
+# Reproduit ce que l'export du repo ML livre (contrat d'intégration ML v2, release r1) avec la copie
+# figée de dsp.py / features.py / ml.py : modèles aux poids aléatoires (pas d'entraînement), lot de
+# parité calculé HORS LIGNE sur chaque extrait entier (dsp.iter_windows), comme l'étape 05 du ML.
 
-BUNDLE_RATE = 24000
+BUNDLE_RATE = 48000
+BUNDLE_WINDOW_MS, BUNDLE_STEP_MS = 100, 20
+BUNDLE_RECOMPUTE = {"band_level_group": "band_levels_avg4", "include_rms": False}
 
 
 def bundle_signal(seconds=6.0, gap_at=150_000, gap_len=2_400, seed=7):
-    """PCM48 de test : bruit + sifflement à niveau variable, et une coupure numérique de 50 ms.
-    La coupure se termine avant la fin de fenêtre suivante : pas d'écart causal (voir stream.py)."""
+    """PCM48 de test : bruit + sifflement à niveau variable, et une coupure numérique de 50 ms."""
     rng = np.random.default_rng(seed)
     n = int(seconds * 48000)
     t = np.arange(n) / 48000
@@ -81,74 +82,82 @@ def bundle_signal(seconds=6.0, gap_at=150_000, gap_len=2_400, seed=7):
     return pcm
 
 
-def _test_models(frame, rng):
+def bundle_features(window):
+    from dsp import window_features
+
+    return window_features(window, BUNDLE_RATE, window_ms=BUNDLE_WINDOW_MS, **BUNDLE_RECOMPUTE)
+
+
+def bundle_windows(pcm):
+    """Fenêtres valides hors ligne (index, PCM) selon la géométrie du bundle de test."""
+    from dsp import iter_windows
+
+    return iter_windows(pcm, BUNDLE_RATE, window_ms=BUNDLE_WINDOW_MS, stride_ms=BUNDLE_STEP_MS)
+
+
+def _bundle_columns():
+    from dsp import BAND_LEVEL_GROUPS
+
+    return list(BAND_LEVEL_GROUPS[BUNDLE_RECOMPUTE["band_level_group"]])
+
+
+def _test_mlp(task, frame, rng, bias):
     import ml
-    from dsp import FLAT_COLS
     from sklearn.preprocessing import StandardScaler
 
-    cnn = ml.CnnPresence(lr=1e-3, dropout=0.15)
-    cnn.state = {
-        "0.weight": rng.normal(0, 0.3, (32, 1, 3, 3)).astype(np.float32),
-        "0.bias": rng.normal(0, 0.1, 32).astype(np.float32),
-        "5.weight": rng.normal(0, 0.3, (1, 128)).astype(np.float32),
-        "5.bias": np.zeros(1, dtype=np.float32),
-    }
-    x = ml.logmel_array(frame) - frame["rms_db"].to_numpy(float)[:, None, None]
-    cnn.mu, cnn.sd = x.mean(axis=(0, 2)), np.maximum(x.std(axis=(0, 2)), 1e-6)
-    mlp = ml.Mlp("distance", lr=1e-3, dropout=0.15)
-    mlp.cols = list(FLAT_COLS)
-    mlp.scaler = StandardScaler().fit(frame[FLAT_COLS].to_numpy(float))
-    mlp.layers = [
-        (rng.normal(0, 0.5, (16, len(FLAT_COLS))), rng.normal(0, 0.1, 16)),
-        (rng.normal(0, 0.5, (1, 16)), np.array([3.0])),
+    model = ml.Mlp(task, lr=1e-3, dropout=0.15)
+    model.cols = _bundle_columns()
+    model.scaler = StandardScaler().fit(frame[model.cols].to_numpy(float))
+    model.layers = [
+        (rng.normal(0, 0.5, (16, len(model.cols))), rng.normal(0, 0.1, 16)),
+        (rng.normal(0, 0.5, (1, 16)), np.array([bias])),
     ]
-    return cnn, mlp
-
-
-def _fir_sha(rate):
-    from dsp import antialias_fir
-
-    fir = antialias_fir(rate)
-    return None if fir is None else hashlib.sha256(fir.astype("<f8").tobytes()).hexdigest()
+    return model
 
 
 def _frozen_sources():
     """Copies figées de l'appli (packages/features) : celles que la release doit embarquer."""
     import dsp
+    import features
     import ml
 
-    return {f"frozen/{Path(m.__file__).name}": Path(m.__file__) for m in (dsp, ml)}
+    return {f"frozen/{Path(m.__file__).name}": Path(m.__file__) for m in (dsp, features, ml)}
 
 
-def bundle_manifest(threshold, rate=BUNDLE_RATE):
-    from dsp import FLAT_COLS, n_frames
-
+def bundle_manifest(threshold):
+    samples = BUNDLE_RATE * BUNDLE_WINDOW_MS // 1000
+    step = BUNDLE_RATE * BUNDLE_STEP_MS // 1000
+    columns = _bundle_columns()
     return {
-        "contract": "edth.model-release.v1",
-        "release": "test.24k-1s.r0",
-        "created_utc": "2026-11-21T20:00:00Z",
+        "contract": "edth.model-release.v2",
+        "release": "test.48k-w100.r0",
+        "created_utc": "2026-11-21T22:00:00Z",
         "frozen": {
-            "repo_commit": "ec518233128d99f83acac6fa3c9dd8581220f210",
+            "repo_commit": "f6c6ce40243abc299a3ab64b81ae9537f24dfa90",
             "files": {name: hashlib.sha256(path.read_bytes()).hexdigest()
                       for name, path in _frozen_sources().items()},
         },
         "input": {
             "transport": {"rate_hz": 48000, "format": "pcm_s16le", "channels": 1},
-            "model_rate_hz": rate,
-            "fir": {"taps": 161, "cutoff_hz": 11000, "kaiser_beta": 8.6,
-                    "coefficients_sha256": _fir_sha(rate)},
-            "window": {"ms": 1000, "step_ms": 250, "samples": rate, "step_samples": rate // 4},
+            "model_rate_hz": BUNDLE_RATE,
+            "fir": None,
+            "window": {"ms": BUNDLE_WINDOW_MS, "step_ms": BUNDLE_STEP_MS,
+                       "samples": samples, "step_samples": step},
             "qc": {"zero_run_ms": 40, "guard_ms": 500, "start_guard_ms": 500},
         },
-        "features": {"fft": 2048, "hop": 1024, "flat_columns": list(FLAT_COLS),
-                     "logmel": {"mels": 32, "frames": n_frames(rate), "dtype": "float32"}},
-        "detection": {"file": "detection/model.joblib", "model": "cnn",
+        "features": {
+            "fft": 2048, "hop": 1024,
+            "band_levels": {"count": 50, "source_bands": 200, "average": 4},
+            "logfft": None, "local_only": True, "recompute": dict(BUNDLE_RECOMPUTE),
+        },
+        "detection": {"file": "detection/model.joblib", "model": "mlp", "columns": columns,
                       "threshold": threshold, "rule": "single_window"},
-        "distance": {"file": "distance/model.joblib", "model": "mlp", "bounds_m": [1.0, 5.0]},
+        "distance": {"file": "distance/model.joblib", "model": "mlp", "columns": columns,
+                     "bounds_m": [1.0, 5.0]},
     }
 
 
-EXCERPT_48K = 72_000  # une session du lot de parité r0 : amorce 500 ms + fenêtre 1 s
+EXCERPT_48K = 28_800  # une session du lot de parité r1 : amorce 500 ms + fenêtre 100 ms
 
 
 def _b64(array):
@@ -157,56 +166,54 @@ def _b64(array):
     return base64.b64encode(np.asarray(array).astype("<i2").tobytes()).decode()
 
 
-def _parity_case(k, excerpt, start, window, features, score, distance, threshold):
-    from dsp import FLAT_COLS, LOGMEL
-
+def _parity_case(k, excerpt, start, window, feats, score, distance, threshold):
     return {
-        "sample_id": f"case-{k}", "device_id": "test", "split": "dev",
+        "sample_id": f"case-{k}", "device_id": "test", "split": "validation",
         "drone_present": None, "distance_m": None,
         "excerpt": {"pcm48_b64": _b64(excerpt), "samples_48k": len(excerpt),
-                    "window_start_offset_24k": int(start), "guard_samples_48k": 24000},
-        "expected": {"window_pcm24_b64": _b64(window),
-                     "flat": {c: float(features[c]) for c in FLAT_COLS},
-                     "logmel": [float(v) for v in features[LOGMEL]],
+                    "window_start_offset": int(start), "guard_samples_48k": 24000},
+        "expected": {"window_pcm_b64": _b64(window), "window_ms": BUNDLE_WINDOW_MS,
+                     "recompute": dict(BUNDLE_RECOMPUTE),
+                     "flat": {c: float(feats[c]) for c in _bundle_columns()},
                      "score": float(score), "distance_m": float(distance),
                      "present": bool(score >= threshold)},
     }
 
 
 def write_model_bundle(root, seed=3, cases=4):
-    """Écrit un bundle complet dans root (format de la release r0) ; renvoie (manifeste, lot).
-    Lot de parité : `cases` sessions de 1,5 s découpées dans le signal de test, chacune avec sa
-    fenêtre attendue calculée hors ligne (dsp.iter_windows), comme 05_export_release du repo ML.
-    Le seuil vaut la médiane des scores : le lot a des cas des deux côtés du seuil."""
+    """Écrit un bundle complet dans root (format de la release r1) ; renvoie (manifeste, lot).
+    Lot de parité : `cases` sessions de 600 ms prises dans le signal de test, chacune avec sa
+    fenêtre attendue calculée hors ligne. Le seuil vaut la médiane des scores : le lot a des cas
+    des deux côtés du seuil."""
     import joblib
     import pandas as pd
-    from dsp import iter_windows, window_features
 
     pcm = bundle_signal(gap_len=0)
-    rows = [window_features(w, BUNDLE_RATE) for _, w in iter_windows(pcm, BUNDLE_RATE)]
-    frame = pd.DataFrame(rows)
-    cnn, mlp = _test_models(frame, np.random.default_rng(seed))
-    excerpts = [pcm[k * EXCERPT_48K : (k + 1) * EXCERPT_48K] for k in range(cases)]
-    windows = [next(iter_windows(x, BUNDLE_RATE)) for x in excerpts]
-    features = [window_features(w, BUNDLE_RATE) for _, w in windows]
-    scores = cnn.predict(pd.DataFrame(features))
-    distances = mlp.predict(pd.DataFrame(features))
+    frame = pd.DataFrame([bundle_features(w) for _, w in bundle_windows(pcm)])
+    rng = np.random.default_rng(seed)
+    detection = _test_mlp("classification", frame, rng, bias=0.0)
+    distance = _test_mlp("distance", frame, rng, bias=3.0)
+    excerpts = [pcm[k * 72_000 : k * 72_000 + EXCERPT_48K] for k in range(cases)]
+    windows = [next(bundle_windows(x)) for x in excerpts]
+    feats = [bundle_features(w) for _, w in windows]
+    scores = detection.predict(pd.DataFrame(feats))
+    distances = distance.predict(pd.DataFrame(feats))
     threshold = float(np.median(scores))
     manifest = bundle_manifest(threshold)
     fixture = {
         "contract": manifest["contract"], "release": manifest["release"],
         "model_rate_hz": BUNDLE_RATE, "transport_rate_hz": 48000, "chunk_hint_samples_48k": 2400,
-        "replay": "une session = un extrait (amorce 500 ms + fenêtre 1 s) ; décimation continue "
-                  "par blocs, fenêtre à window_start_offset_24k",
+        "replay": "une session = un extrait (amorce 500 ms + fenêtre) ; fenêtre à "
+                  "window_start_offset dans le flux au taux modèle",
         "cases": [
             _parity_case(k, x, i, w, f, s, d, threshold)
             for k, (x, (i, w), f, s, d) in enumerate(
-                zip(excerpts, windows, features, scores, distances, strict=True)
+                zip(excerpts, windows, feats, scores, distances, strict=True)
             )
         ],
     }
     root = Path(root)
-    for sub, model in (("detection", cnn), ("distance", mlp)):
+    for sub, model in (("detection", detection), ("distance", distance)):
         (root / sub).mkdir(parents=True, exist_ok=True)
         joblib.dump(model, root / sub / "model.joblib")
     (root / "frozen").mkdir(exist_ok=True)

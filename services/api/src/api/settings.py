@@ -75,6 +75,8 @@ class Settings:
     model_revision: str | None = _setting("DISTANCE_MODEL_REVISION", _TEXT, None)
     model_release: str | None = _setting("DISTANCE_MODEL_RELEASE", _TEXT, None)  # dossier du repo
     model_uncertainty: float = _setting("MODEL_UNCERTAINTY", _POSITIVE, 0.10)  # ± relatif annoncé
+    # Cadence des estimations : multiple du pas de la release (r1 : 20 ms), vérifié au chargement
+    model_period_ms: int = _setting("MODEL_PERIOD_MS", _MS, 100)
     hf_token: str | None = field(  # secret : absent du repr (logs, traces)
         default=None, repr=False, metadata={"env": "HF_TOKEN", "kind": _TEXT}
     )

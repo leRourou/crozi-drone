@@ -23,7 +23,8 @@ TRANSPORT_RATE = 48000
 @dataclass(frozen=True)
 class Windowing:
     """Fenêtrage d'une release. rate, samples, step, start : au taux modèle ; zero_run, guard :
-    48 kHz. Invariant (vérifié au chargement) : chaque fenêtre finit à la fin d'un bloc d'un pas."""
+    48 kHz. Invariant (vérifié au chargement) : la fin de chaque fenêtre tombe sur un pas, donc à la
+    fin de tout bloc d'un nombre entier de pas."""
 
     rate: int
     samples: int
@@ -38,7 +39,7 @@ class Windowing:
 
     @property
     def chunk_frames(self) -> int:
-        """Taille d'un bloc reçu, en échantillons 48 kHz : un pas."""
+        """Un pas, en échantillons 48 kHz : la plus petite taille de bloc acceptée par push."""
         return self.step * self.factor
 
 
@@ -70,7 +71,7 @@ class Stream:
         self._last_gap_end = -math.inf  # fin de la dernière coupure (≥ zero_run) terminée
 
     def push(self, pcm48: np.ndarray) -> Ready | Skipped:
-        """pcm48 : exactement un bloc (chunk_frames échantillons) ; la fenêtre qu'il complète."""
+        """pcm48 : un nombre entier de pas ; renvoie la dernière fenêtre complétée par le bloc."""
         self._track_zeros(pcm48)
         y = self._decimator.process(pcm48)
         self._decimated += len(y)

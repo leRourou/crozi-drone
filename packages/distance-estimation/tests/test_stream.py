@@ -5,16 +5,16 @@ import numpy as np
 import pytest
 from dsp import iter_windows
 
-from conftest import BUNDLE_RATE, bundle_signal
+from conftest import bundle_signal, bundle_windows
 from distance_estimation.stream import Ready, Skipped, Stream, Windowing
 
 WINDOWING = Windowing(rate=24000, samples=24000, step=6000, start=12000, zero_run=1920, guard=24000)
 CHUNK = WINDOWING.chunk_frames
 
 
-def live(pcm, windowing=WINDOWING):
+def live(pcm, windowing=WINDOWING, chunk=CHUNK):
     stream = Stream(windowing)
-    return [stream.push(pcm[i : i + CHUNK]) for i in range(0, len(pcm) - CHUNK + 1, CHUNK)]
+    return [stream.push(pcm[i : i + chunk]) for i in range(0, len(pcm) - chunk + 1, chunk)]
 
 
 def ready(steps):
@@ -22,7 +22,9 @@ def ready(steps):
 
 
 def offline(pcm):
-    return list(iter_windows(pcm, BUNDLE_RATE))
+    """Oracle hors ligne dans la géométrie de WINDOWING (24 kHz, 1 s, pas de 250 ms : chemin décimé,
+    blocs plus longs qu'une coupure minimale)."""
+    return list(iter_windows(pcm, 24000, window_ms=1000, stride_ms=250))
 
 
 def assert_same_windows(live_windows, offline_windows):
@@ -106,3 +108,22 @@ B = 9 * CHUNK  # une frontière de bloc = une fin de fenêtre (108 000 à 48 kHz
 def test_dropout_boundaries_match_offline(gaps):
     pcm = clean_signal(gaps)
     assert_same_windows(ready(live(pcm)), offline(pcm))
+
+
+# ---------------------------------------------------------------- géométrie de la release r1
+R1 = Windowing(rate=48000, samples=4800, step=960, start=24000, zero_run=1920, guard=24000)
+
+
+def test_r1_live_windows_are_the_offline_windows_at_48_khz_without_decimation():
+    pcm = bundle_signal(gap_len=0)
+    assert_same_windows(ready(live(pcm, R1, R1.chunk_frames)), list(bundle_windows(pcm)))
+
+
+def test_r1_a_dropout_costs_at_most_two_extra_windows_live():
+    """Pas (20 ms) plus court qu'une coupure minimale (40 ms) : les fenêtres qui finissent dans les
+    40 premières ms d'une coupure sont encore analysées en live (écart causal), pas hors ligne."""
+    pcm = bundle_signal()
+    live_starts = {i for i, _ in ready(live(pcm, R1, R1.chunk_frames))}
+    offline_starts = {i for i, _ in bundle_windows(pcm)}
+    assert offline_starts < live_starts
+    assert len(live_starts - offline_starts) <= 2

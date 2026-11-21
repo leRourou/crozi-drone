@@ -40,14 +40,26 @@ def test_otherwise_the_pinned_revision_is_fetched_with_the_token(tmp_path):
     assert calls == [("team/model", SHA, "hf_x", "edth.audio.24k-1s.r0")]
 
 
-def test_the_model_estimation_feeds_one_step_per_window_without_simulated_truth(
+def test_the_model_estimation_takes_one_period_per_chunk_without_simulated_truth(
     model_bundle, caplog
 ):
     settings = Settings(estimator="model", model_dir=str(model_bundle), model_uncertainty=0.2)
     with caplog.at_level(logging.INFO, logger="crozidrone.audio"):
         estimation = make_estimation(settings, load_profiles())
-    assert (estimation.window_frames, estimation.truth) == (12000, None)
-    assert "event=model_loaded release=test.24k-1s.r0 source=local" in caplog.text
+    assert (estimation.window_frames, estimation.truth) == (4800, None)  # MODEL_PERIOD_MS=100
+    assert "event=model_loaded release=test.48k-w100.r0 source=local" in caplog.text
+    assert "period_ms=100" in caplog.text
+
+
+def test_the_estimate_period_sets_the_chunk_size(model_bundle):
+    settings = Settings(estimator="model", model_dir=str(model_bundle), model_period_ms=20)
+    assert make_estimation(settings, load_profiles()).window_frames == 960
+
+
+def test_a_period_that_is_not_a_whole_number_of_release_steps_stops_the_server(model_bundle):
+    settings = Settings(estimator="model", model_dir=str(model_bundle), model_period_ms=30)
+    with pytest.raises(ValueError, match="20 ms"):
+        create_app(None, load_profiles(), settings)
 
 
 def test_a_broken_bundle_stops_the_server_from_starting(model_bundle, tmp_path):
@@ -86,5 +98,5 @@ def test_the_release_folder_must_hold_the_announced_release(model_bundle, tmp_pa
         estimator="model", model_repo="team/model", model_revision=SHA,
         model_release="edth.audio.24k-1s.r1",
     )
-    with pytest.raises(ValueError, match="test.24k-1s.r0"):
+    with pytest.raises(ValueError, match="test.48k-w100.r0"):
         make_estimation(settings, load_profiles(), fetch=lambda *args: snapshot)

@@ -1,7 +1,7 @@
 """Bibliothèque partagée des étapes 02 (classification) et 03 (distance).
 
 Architectures gelées d'après l'HPO préliminaire (run RTX 3090) :
-  - détection : CNN 2D sur log-mel RELATIVE, un bloc conv 32 canaux,
+  - détection : CNN 2D sur le spectre FFT relatif en dB, un bloc conv 32 canaux,
     dropout 0.15, ~450 paramètres, seuil 0.5, sans one-hot téléphone ;
   - distance  : MLP 16 cachées, dropout 0.15, sur niveaux ABSOLUS pleine
     bande, sans one-hot téléphone, sortie bornée [1, 5] m.
@@ -22,40 +22,43 @@ from sklearn.preprocessing import StandardScaler
 FROZEN = {("classification", "cnn"): dict(lr=7.7e-3, dropout=0.15),
           ("distance", "mlp"): dict(lr=3e-3, dropout=0.15)}
 BATCH_CNN, BATCH_MLP = 512, 128
-KEYS = ["sample_id", "device_id", "group_id", "split", "fold", "drone_present", "distance_m"]
+KEYS = ["sample_id", "device_id", "group_id", "split", "drone_present", "distance_m"]
 
 
 def weights(d):
     return 1.0 / d.groupby("sample_id")["sample_id"].transform("size").to_numpy(float)
 
 
-def logmel_array(d):
-    raw = d["logmel"].to_numpy()
-    arr = (np.stack([np.asarray(v, dtype=float).ravel() for v in raw]) if raw.dtype == object
-           else np.asarray(raw, dtype=float).reshape(len(d), -1))
-    if arr.shape[1] % 32 or not np.isfinite(arr).all():
-        raise ValueError("logmel invalide (multiple de 32 valeurs finies attendu)")
-    return arr.reshape(len(d), 32, -1)
+def logfft_array(d):
+    bins = sum(name.startswith("fft_") for name in d.columns)
+    arr = np.stack(d["logfft"].to_numpy()).astype(np.float32, copy=False)
+    if not bins or arr.ndim != 2 or not arr.shape[1] or arr.shape[1] % bins or not np.isfinite(arr).all():
+        raise ValueError("logfft invalide pour le nombre de bins FFT du cache")
+    return arr.reshape(len(d), bins, -1)
 
 
 def _flat_x(d, cols, relative):
     x = d[cols].to_numpy(float, copy=True)
     if relative:
-        x -= d[["rms_db"]].to_numpy()
+        spectral = [i for i, c in enumerate(cols) if c.startswith(("fft_", "band_level_")) or c == "b4_8"]
+        if spectral:
+            if "rms_db" not in d:
+                raise ValueError("rms_db est requis pour les niveaux relatifs.")
+            x[:, spectral] -= d[["rms_db"]].to_numpy()
         x = np.delete(x, [i for i, c in enumerate(cols) if c == "rms_db"], axis=1)
     return x
 
 
-def _band_stats(x, w):
+def _bin_stats(x, w):
     wn = w / w.sum()
-    mu = (wn[:, None] * x.mean(axis=2)).sum(axis=0)
-    var = (wn[:, None] * ((x - mu[None, :, None]) ** 2).mean(axis=2)).sum(axis=0)
-    sd = np.sqrt(np.maximum(var, 0.0))
-    return mu, np.where(sd < 1e-6, 1.0, sd)
+    mu = wn @ x.mean(axis=2, dtype=np.float64)
+    second = np.einsum("i,ift,ift->f", wn, x, x) / x.shape[2]
+    sd = np.sqrt(np.maximum(second - mu**2, 0.0))
+    return mu.astype(np.float32), np.where(sd < 1e-6, 1.0, sd).astype(np.float32)
 
 
 class CnnPresence:
-    """Détection gelée : CNN convolutif sur log-mel relative (audio seul)."""
+    """Détection par CNN sur le spectre FFT relatif en dB."""
     task = "classification"
 
     def __init__(self, lr, dropout):
@@ -63,13 +66,18 @@ class CnnPresence:
         self.curve, self.best_epoch, self.state = [], 0, None
 
     def _input(self, d):
-        return logmel_array(d) - d["rms_db"].to_numpy(float)[:, None, None]  # relative, gelé
+        return logfft_array(d) - d["rms_db"].to_numpy(np.float32)[:, None, None]
 
     def _net(self):
         from torch import nn
         return nn.Sequential(nn.Conv2d(1, 32, 3, padding=1), nn.ReLU(),
                              nn.Dropout2d(self.dropout), nn.AdaptiveAvgPool2d((2, 2)),
                              nn.Flatten(), nn.Linear(128, 1))
+
+    @staticmethod
+    def _logits(net, x):
+        import torch
+        return torch.cat([net(batch.unsqueeze(1)).flatten() for batch in x.split(BATCH_CNN)])
 
     def fit(self, d, valid=None, device="cpu", epochs=60, patience=8, seed=42, cols=None):
         import torch
@@ -78,7 +86,7 @@ class CnnPresence:
             valid = None
         w = weights(d)
         x = self._input(d)
-        self.mu, self.sd = _band_stats(x, w)
+        self.mu, self.sd = _bin_stats(x, w)
         tx = torch.as_tensor(self._scale(x), dtype=torch.float32, device=device)
         ty = torch.as_tensor(d.drone_present.to_numpy(np.float32), device=device)
         tw = torch.as_tensor(w / w.mean(), dtype=torch.float32, device=device)
@@ -95,23 +103,28 @@ class CnnPresence:
         for epoch in range(1, epochs + 1):
             net.train()
             order = torch.randperm(len(tx), generator=gen)  # une permutation par époque
+            epoch_loss = torch.zeros((), device=device)
+            correct = torch.zeros((), device=device)
             for start in range(0, len(tx), BATCH_CNN):
                 idx = order[start:start + BATCH_CNN]
                 optim.zero_grad(set_to_none=True)
-                loss = (criterion(net(tx[idx].unsqueeze(1)).flatten(), ty[idx]) * tw[idx]).mean()
+                logits = net(tx[idx].unsqueeze(1)).flatten()
+                loss = (criterion(logits, ty[idx]) * tw[idx]).mean()
                 loss.backward()
                 optim.step()
+                epoch_loss += loss.detach() * len(idx)
+                correct += (((logits.detach() >= 0) == ty[idx].bool()) * tw[idx]).sum()
             net.eval()
             with torch.inference_mode():
-                tp = net(tx.unsqueeze(1)).flatten()
-                row = {"epoch": epoch, "train_loss": float((criterion(tp, ty) * tw).mean()),
-                       "train_accuracy": float((((tp >= 0) == ty.bool()).float() * tw).mean())}
+                row = {"epoch": epoch, "train_loss": float(epoch_loss / len(tx)),
+                       "train_accuracy": float(correct / len(tx))}
                 score = row["train_loss"] if valid is None else None
                 if valid is not None:
-                    vp = net(vx.unsqueeze(1)).flatten()
+                    vp = self._logits(net, vx)
                     score = float((criterion(vp, vy) * vw).sum() / vw.sum())
                     row.update(val_loss=score, val_accuracy=float((((vp >= 0) == vy.bool()).float() * vw).sum() / vw.sum()))
             self.curve.append(row)
+            print(f"époque {epoch}/{epochs}  loss = {score:.4f}", flush=True)
             if not np.isfinite(score):
                 raise ValueError("loss non finie")
             if valid is None or score < best - 1e-6:
@@ -128,24 +141,31 @@ class CnnPresence:
 
     def predict(self, d, *, bounded=True):
         import torch
+        if d.empty:
+            return np.empty(0)
         net = self._net()
         net.load_state_dict({k: torch.from_numpy(np.ascontiguousarray(v)) for k, v in self.state.items()})
         net.eval()
         x = self._scale(self._input(d))
         with torch.inference_mode():
-            out = [torch.sigmoid(net(torch.from_numpy(x[s:s + BATCH_CNN]).unsqueeze(1)).flatten()).numpy()
-                   for s in range(0, len(x), BATCH_CNN)]
-        return np.concatenate(out) if out else np.empty(0)
+            return torch.sigmoid(self._logits(net, torch.from_numpy(x))).numpy()
 
     def parameter_count(self):
         return int(sum(v.size for v in self.state.values()))
 
 
 class Mlp:
-    """MLP gelé (16 cachées, dropout 0.15) pour l'une ou l'autre tâche."""
+    """MLP à profondeur configurable pour l'une ou l'autre tâche."""
 
-    def __init__(self, task, lr, dropout, relative=False):
+    def __init__(self, task, lr, dropout, relative=False, *,
+                 hidden_units=16, depth=1, batch_size=BATCH_MLP, weight_decay=0.01):
+        if depth not in (1, 2, 3) or hidden_units < 1:
+            raise ValueError("depth must be 1, 2, or 3 and hidden_units must be positive")
         self.task, self.lr, self.dropout, self.relative = task, float(lr), float(dropout), bool(relative)
+        self.hidden_units = hidden_units
+        self.depth = depth
+        self.batch_size = batch_size
+        self.weight_decay = weight_decay
         self.curve, self.best_epoch, self.layers = [], 0, None
 
     def fit(self, d, valid=None, device="cpu", epochs=60, patience=8, seed=42, cols=None):
@@ -161,9 +181,17 @@ class Mlp:
         cls = self.task == "classification"
         y = d.drone_present.to_numpy(float) if cls else d.distance_m.to_numpy(float)
         torch.manual_seed(seed)
-        net = nn.Sequential(nn.Linear(x.shape[1], 16),
-                            nn.Dropout(self.dropout), nn.ReLU(), nn.Linear(16, 1)).to(device)
-        optim = torch.optim.AdamW(net.parameters(), lr=self.lr)
+        hidden_units = getattr(self, "hidden_units", 16)
+        batch_size = getattr(self, "batch_size", BATCH_MLP)
+        weight_decay = getattr(self, "weight_decay", 0.01)
+        layers = []
+        inputs = x.shape[1]
+        for _ in range(getattr(self, "depth", 1)):
+            layers.extend((nn.Linear(inputs, hidden_units), nn.Dropout(self.dropout), nn.ReLU()))
+            inputs = hidden_units
+        layers.append(nn.Linear(inputs, 1))
+        net = nn.Sequential(*layers).to(device)
+        optim = torch.optim.AdamW(net.parameters(), lr=self.lr, weight_decay=weight_decay)
         criterion = nn.BCEWithLogitsLoss(reduction="none") if cls else nn.SmoothL1Loss(reduction="none")
         tx = torch.as_tensor(x, dtype=torch.float32, device=device)
         ty = torch.as_tensor(y, dtype=torch.float32, device=device)
@@ -177,7 +205,7 @@ class Mlp:
         best = np.inf
         for epoch in range(1, epochs + 1):
             net.train()
-            for idx in torch.randperm(len(y), device=device).split(BATCH_MLP):
+            for idx in torch.randperm(len(y), device=device).split(batch_size):
                 optim.zero_grad()
                 (criterion(net(tx[idx]).flatten(), ty[idx]) * tw[idx]).mean().backward()
                 optim.step()
@@ -268,7 +296,8 @@ class Constant:
         return 0
 
 
-def build(task, name, lr=None, dropout=None, relative=False):
+def build(task, name, lr=None, dropout=None, relative=False, *, hidden_units=16, depth=1,
+          batch_size=BATCH_MLP, weight_decay=0.01):
     """Construit un modèle ; lr/dropout par défaut = valeurs gelées de l'HPO."""
     frozen = FROZEN.get((task, name), dict(lr=3e-3, dropout=0.15))
     lr = frozen["lr"] if lr is None else float(lr)
@@ -276,7 +305,8 @@ def build(task, name, lr=None, dropout=None, relative=False):
     if name == "cnn":
         return CnnPresence(lr, dropout)  # relatif par conception, sans option
     if name == "mlp":
-        return Mlp(task, lr, dropout, relative)
+        return Mlp(task, lr, dropout, relative, hidden_units=hidden_units, depth=depth,
+                   batch_size=batch_size, weight_decay=weight_decay)
     if name == "logistic":
         return Linear("classification", "logistic", relative)
     if name == "ridge":
@@ -294,18 +324,21 @@ def load(cache):
     missing = [c for c in KEYS if c not in d]
     if missing:
         raise ValueError(f"colonnes manquantes : {missing}")
+    legacy = d.split.eq("dev").fillna(False)
+    if legacy.any():
+        if "fold" not in d:
+            raise ValueError("ancienne partition dev sans colonne fold")
+        folds = pd.to_numeric(d.loc[legacy, "fold"], errors="coerce")
+        if not np.isfinite(folds).all() or (folds % 1 != 0).any():
+            raise ValueError("plis de développement invalides")
+        d.loc[legacy, "split"] = np.where(folds.eq(0), "validation", "train")
     ids = [c for c in KEYS if c != "distance_m"]  # distance_m est NaN pour les négatives
-    if d[ids].isna().any().any() or not d.split.isin(["dev", "test", "excluded"]).all():
+    if d[ids].isna().any().any() or not d.split.isin(["train", "validation", "test", "excluded"]).all():
         raise ValueError("identifiants, split ou étiquettes invalides")
     if (d.groupby("sample_id")[["group_id", "device_id", "drone_present", "distance_m"]].nunique(dropna=False) > 1).any().any():
         raise ValueError("métadonnées incohérentes au sein d'une prise")
     if (d.groupby("group_id").split.nunique() > 1).any():
-        raise ValueError("un groupe temporel traverse dev et test : fuite de données")
-    if (d[d.split == "dev"].groupby("group_id").fold.nunique() > 1).any():
-        raise ValueError("un groupe est réparti sur plusieurs plis")
-    folds = pd.to_numeric(d.loc[d.split == "dev", "fold"], errors="coerce")
-    if not np.isfinite(folds).all() or (folds % 1 != 0).any():
-        raise ValueError("plis de développement invalides")
+        raise ValueError("un groupe temporel traverse plusieurs partitions")
     if d.loc[d.drone_present, "distance_m"].isna().any() or d.loc[~d.drone_present, "distance_m"].notna().any():
         raise ValueError("présence et distance incohérentes")
     return d
@@ -346,87 +379,75 @@ def selection_metric(task):
 
 # ---------------------------------------------------------------- expérience complète (étapes 02/03)
 
-def plot_curves(out, curves, task):
+def plot_curves(out, rows, task):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    if not curves or not next(iter(curves.values())):
+    if not rows:
         return
     metric = "val_accuracy" if task == "classification" else "val_mae"
     fig, axes = plt.subplots(1, 2, figsize=(10, 4), layout="constrained")
-    for fold, rows in curves.items():
-        epochs = [r["epoch"] for r in rows]
-        line, = axes[0].plot(epochs, [r["train_loss"] for r in rows], label=f"Train {fold}")
-        if "val_loss" in rows[0]:
-            axes[0].plot(epochs, [r["val_loss"] for r in rows], "--", color=line.get_color(), label=f"Val {fold}")
-        if metric in rows[0]:
-            axes[1].plot(epochs, [r[metric] for r in rows], label=f"Val {fold}")
-    axes[0].set(xlabel="Époque", title="Loss pondérée par prise"); axes[0].legend(fontsize=8)
-    axes[1].set(xlabel="Époque", title=metric); axes[1].legend(fontsize=8)
+    epochs = [r["epoch"] for r in rows]
+    axes[0].plot(epochs, [r["train_loss"] for r in rows], label="Train")
+    axes[0].plot(epochs, [r["val_loss"] for r in rows], "--", label="Validation")
+    axes[1].plot(epochs, [r[metric] for r in rows])
+    axes[0].set(xlabel="Époque", title="Loss pondérée par prise")
+    axes[0].legend(fontsize=8)
+    axes[1].set(xlabel="Époque", title=metric)
     fig.savefig(out / "learning-curves.png")
     plt.close(fig)
 
 
 def experiment(task, a):
-    """CV groupée sur dev -> réajustement final -> UNE lecture du holdout -> sorties.
-
-    La sélection (choix du modèle, des features, du taux) se fait sur dev ;
-    le holdout n'est lu qu'ici, à la fin, jamais pour entraîner ou choisir.
-    """
+    """Entraîne une fois, sélectionne sur la validation et évalue le holdout."""
+    out = Path(a.out) / a.name
+    if (out / "config.json").is_file():
+        raise SystemExit(f"{out} existe déjà : choisir un autre --name.")
     frame = task_frame(load(a.input), task)
-    if a.model == "cnn" and "logmel" not in frame:
-        raise SystemExit("le modèle cnn exige la colonne 'logmel' du cache.")
-    dev, test = frame[frame.split == "dev"].copy(), frame[frame.split == "test"].copy()
-    folds = sorted(int(f) for f in dev.fold.unique())
-    if len(folds) < 2 or test.empty:
-        raise SystemExit("il faut deux plis de développement et un holdout non vide.")
+    if a.model == "cnn" and "logfft" not in frame:
+        raise SystemExit("le modèle cnn exige la colonne 'logfft'. Relancer l'étape 01.")
+    train, valid, test = (frame[frame.split == split] for split in ("train", "validation", "test"))
+    if train.empty or valid.empty or test.empty:
+        raise SystemExit("il faut des partitions train, validation et test non vides.")
+    if task == "classification" and train.drone_present.nunique() != 2:
+        raise SystemExit("l'entraînement doit contenir les deux classes.")
     # Hyperparamètres : valeurs gelées de l'HPO sauf surcharge explicite au CLI.
     frozen = FROZEN.get((task, a.model), dict(lr=3e-3, dropout=0.15))
     lr = frozen["lr"] if a.lr is None else float(a.lr)
     dropout = frozen["dropout"] if a.dropout is None else float(a.dropout)
     cols = None if a.model in ("cnn", "constant") else a.resolve_features(a.features)
-    metric, rows, pooled, curves, best = selection_metric(task), [], [], {}, []
-    for f in folds:
-        tr, va = dev[dev.fold != f], dev[dev.fold == f]
-        if task == "classification" and tr.drone_present.nunique() != 2:
-            raise SystemExit(f"le train du pli {f} ne contient pas les deux classes.")
-        model = build(task, a.model, lr, dropout, a.relative)
-        model.fit(tr, va, device=a.device, epochs=a.epochs, patience=a.patience, seed=a.seed + f, cols=cols)
-        pred = model.predict(va)
-        pooled.append(va.assign(pred=pred))
-        rows.append({"fold": f, metric: metrics(va.assign(pred=pred), task)[metric]})
-        curves[f"fold_{f}"] = model.curve
-        if a.model in ("cnn", "mlp"):
-            best.append(model.best_epoch)
-        print(f"pli {f} : {metric} = {rows[-1][metric]:.4f}")
-    pooled = pd.concat(pooled)
-    cv = report(pooled, pooled.pred.to_numpy(), task)
-    final_epochs = a.epochs if not best else max(1, int(np.median(best)))
-    final = build(task, a.model, lr, dropout, a.relative)
-    final.fit(dev, None, device=a.device, epochs=final_epochs, seed=a.seed, cols=cols)
-    test_report = report(test, final.predict(test), task)
+    if cols and not set(cols).issubset(frame):
+        raise SystemExit("cache incomplet pour les features demandées. Relancer l'étape 01.")
+    model = build(task, a.model, lr, dropout, a.relative,
+                  hidden_units=getattr(a, "hidden_units", 16), depth=getattr(a, "depth", 1),
+                  batch_size=getattr(a, "batch_size", BATCH_MLP),
+                  weight_decay=getattr(a, "weight_decay", 0.01))
+    model.fit(train, valid, device=a.device, epochs=a.epochs, patience=a.patience, seed=a.seed, cols=cols)
+    validation = report(valid, model.predict(valid), task)
+    test_report = report(test, model.predict(test), task)
     if task == "distance":
-        test_report["unbounded"] = metrics(test.assign(pred=final.predict(test, bounded=False)), task)
+        test_report["unbounded"] = metrics(test.assign(pred=model.predict(test, bounded=False)), task)
 
-    out = Path(a.out) / a.name
-    if (out / "config.json").is_file():
-        raise SystemExit(f"{out} existe déjà : choisir un autre --name ou le supprimer.")
     out.mkdir(parents=True, exist_ok=True)
-    joblib.dump(final, out / "model.joblib")
-    (out / "cv.csv").write_text(pd.DataFrame(rows).to_csv(index=False))
-    (out / "curves.json").write_text(json.dumps({"folds": curves, "final": final.curve,
-                                                 "fold_best_epochs": best, "final_epochs": final_epochs}, indent=2))
+    joblib.dump(model, out / "model.joblib")
+    best_epoch = getattr(model, "best_epoch", None)
+    (out / "curves.json").write_text(json.dumps({"training": model.curve, "best_epoch": best_epoch}, indent=2))
     config = dict(task=task, model=a.model, cache=Path(a.input).name, rate=a.rate,
-                  features=a.features, columns=cols, lr=lr, dropout=dropout,
+                  features="logfft,rms" if a.model == "cnn" else a.features,
+                  columns=cols, lr=lr, dropout=dropout,
                   relative=True if a.model == "cnn" else bool(a.relative),
-                  epochs=a.epochs, final_epochs=final_epochs, seed=a.seed, device=a.device,
-                  parameters=final.parameter_count(), dev_cv=cv["overall"])
+                  epochs=a.epochs, best_epoch=best_epoch, seed=a.seed, device=a.device,
+                  parameters=model.parameter_count(), validation=validation["overall"])
+    if a.model == "mlp":
+        config.update(depth=model.depth, hidden_units=model.hidden_units,
+                      batch_size=model.batch_size, weight_decay=model.weight_decay)
     (out / "config.json").write_text(json.dumps(config, indent=2, allow_nan=False) + "\n")
     (out / "metrics.json").write_text(json.dumps(
-        {"task": task, "model": a.model, "cache": Path(a.input).name, "dev_cv": cv["overall"],
+        {"task": task, "model": a.model, "cache": Path(a.input).name, "validation": validation,
          "test": test_report,
          "scope": "Holdout groupé de la même campagne ; seuil 0.5, pas de lissage ni hystérésis."},
         indent=2, allow_nan=False) + "\n")
-    plot_curves(out, curves, task)
-    print(f"{task}/{a.model} : dev {metric} = {cv['overall'][metric]:.4f} ; "
+    plot_curves(out, model.curve, task)
+    metric = selection_metric(task)
+    print(f"{task}/{a.model} : validation {metric} = {validation['overall'][metric]:.4f} ; "
           f"holdout {metric} = {test_report['overall'][metric]:.4f} -> {out}")

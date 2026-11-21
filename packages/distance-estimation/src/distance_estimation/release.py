@@ -1,8 +1,11 @@
-"""Bundle de release du modèle (contrat d'intégration ML V1, `edth.model-release.v1`).
+"""Bundle de release du modèle (contrat d'intégration ML v2, `edth.model-release.v2`).
 
-Un bundle = manifest.json + detection/ et distance/model.joblib + parity/fixture.json. Le chargement
-valide le manifeste contre la copie figée de dsp.py, charge les pickles (qui référencent le module
-`ml`), puis rejoue le lot de parité par le chemin live : tout écart → ValueError, jamais de repli.
+Un bundle = manifest.json + frozen/ (dsp.py, features.py, ml.py) + detection/ et
+distance/model.joblib + parity/fixture.json. Le chargement valide le manifeste contre la copie
+figée (packages/features), charge les pickles (qui référencent le module `ml`), vérifie leurs
+colonnes, puis rejoue le lot de parité par le chemin live : tout écart → ValueError, sans repli.
+Les features d'une fenêtre sont recalculées par `dsp.window_features` avec les arguments exacts de
+`features.recompute` (v2 : features locales de fenêtre uniquement).
 Le module lit un dossier local ; le téléchargement (Hugging Face) relève de services/api.
 """
 
@@ -10,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import inspect
 import json
 import os
 from collections.abc import Mapping
@@ -18,6 +22,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import dsp
+import features as frozen_features
 import joblib
 import ml
 import numpy as np
@@ -25,13 +30,17 @@ import pandas as pd
 
 from distance_estimation.stream import TRANSPORT_RATE, Ready, Stream, Windowing
 
-CONTRACT = "edth.model-release.v1"
+CONTRACT = "edth.model-release.v2"
 TRANSPORT = {"rate_hz": TRANSPORT_RATE, "format": "pcm_s16le", "channels": 1}
 PARITY_FILE = "parity/fixture.json"
 # Code figé embarqué par la release : l'appli importe exactement ces fichiers (packages/features).
-FROZEN = {"frozen/dsp.py": Path(dsp.__file__), "frozen/ml.py": Path(ml.__file__)}
+FROZEN = {f"frozen/{Path(m.__file__).name}": Path(m.__file__) for m in (dsp, frozen_features, ml)}
+# Arguments de dsp.window_features que features.recompute peut fixer (window_ms : input.window).
+RECOMPUTE_ARGS = frozenset(inspect.signature(dsp.window_features).parameters) - {
+    "pcm", "rate", "window_ms"
+}
 # Parité : features identiques (même code, décimation invariante par blocs) ; scores à l'écart
-# flottant près (le CNN est évalué par lots hors ligne, fenêtre par fenêtre en live).
+# flottant près (modèles évalués par lots hors ligne, fenêtre par fenêtre en live).
 FEATURE_ATOL, DECISION_ATOL = 1e-9, 1e-6
 
 
@@ -43,7 +52,7 @@ class Predictor(Protocol):
 class Decision:
     """Sortie des modèles pour une fenêtre valide : distance None sous le seuil de détection."""
 
-    features: Mapping[str, Any]  # sortie de dsp.window_features (colonnes plates + logmel)
+    features: Mapping[str, Any]  # sortie de dsp.window_features (une valeur par colonne)
     score: float
     distance_m: float | None
 
@@ -55,9 +64,13 @@ class Release:
     threshold: float
     detection: Predictor
     distance: Predictor
+    window_ms: int
+    recompute: Mapping[str, Any]  # arguments de dsp.window_features (manifeste, features.recompute)
 
     def decide(self, window: np.ndarray) -> Decision:
-        features = dsp.window_features(window, self.windowing.rate)
+        features = dsp.window_features(
+            window, self.windowing.rate, window_ms=self.window_ms, **self.recompute
+        )
         frame = pd.DataFrame([features])
         score = float(self.detection.predict(frame)[0])
         if score < self.threshold:
@@ -72,6 +85,10 @@ class _Manifest:
     threshold: float
     detection_file: str
     distance_file: str
+    detection_columns: list[str]
+    distance_columns: list[str]
+    window_ms: int
+    recompute: Mapping[str, Any]
     frozen: Mapping[str, Any]
 
 
@@ -83,11 +100,20 @@ def load_release(root: Path) -> Release:
         manifest.name,
         manifest.windowing,
         manifest.threshold,
-        joblib.load(_bundle_file(root, manifest.detection_file)),
-        joblib.load(_bundle_file(root, manifest.distance_file)),
+        _load_model(root, manifest.detection_file, manifest.detection_columns, "detection"),
+        _load_model(root, manifest.distance_file, manifest.distance_columns, "distance"),
+        manifest.window_ms,
+        manifest.recompute,
     )
     check_parity(release, json.loads(_bundle_file(root, PARITY_FILE).read_text("utf-8")))
     return release
+
+
+def _load_model(root: Path, name: str, columns: list[str], role: str) -> Predictor:
+    model = joblib.load(_bundle_file(root, name))
+    if list(getattr(model, "cols", [])) != columns:
+        raise ValueError(f"manifeste : {role}.columns diffère des colonnes du modèle {name}")
+    return model
 
 
 def _bundle_file(root: Path, name: str) -> Path:
@@ -150,16 +176,34 @@ def parse_manifest(data: Mapping[str, Any]) -> _Manifest:
     rate = _field(data, "input.model_rate_hz")
     if rate not in dsp.RATES:
         raise ValueError(f"manifeste : model_rate_hz {rate!r} inconnu de dsp.py ({dsp.RATES})")
-    if _field(data, "input.fir.coefficients_sha256") != _fir_sha256(rate):
-        raise ValueError("manifeste : empreinte FIR différente de la copie figée de dsp.py")
+    fir = _field(data, "input.fir")
+    if (None if fir is None else _field(fir, "coefficients_sha256")) != _fir_sha256(rate):
+        raise ValueError("manifeste : FIR différent de celui de la copie figée de dsp.py")
     return _Manifest(
         name=str(_field(data, "release")),
         windowing=_windowing(data, rate),
         threshold=_threshold(_field(data, "detection.threshold")),
         detection_file=str(_field(data, "detection.file")),
         distance_file=str(_field(data, "distance.file")),
+        detection_columns=list(_field(data, "detection.columns")),
+        distance_columns=list(_field(data, "distance.columns")),
+        window_ms=_field(data, "input.window.ms"),
+        recompute=_recompute(data),
         frozen=_field(data, "frozen.files"),
     )
+
+
+def _recompute(data: Mapping[str, Any]) -> dict[str, Any]:
+    if _field(data, "features.local_only") is not True:
+        raise ValueError("manifeste : features.local_only doit être vrai (features de fenêtre)")
+    recompute = dict(_field(data, "features.recompute"))
+    unknown = sorted(set(recompute) - RECOMPUTE_ARGS)
+    if unknown:
+        raise ValueError(f"manifeste : features.recompute inconnus de window_features {unknown}")
+    group = recompute.get("band_level_group")
+    if group is not None and group not in dsp.BAND_LEVEL_LAYOUTS:
+        raise ValueError(f"manifeste : band_level_group {group!r} inconnu de dsp.py")
+    return recompute
 
 
 def _windowing(data: Mapping[str, Any], rate: int) -> Windowing:
@@ -207,19 +251,24 @@ def _replay_case(release: Release, case: Mapping[str, Any]) -> str | None:
         return f"extrait de {len(pcm)} échantillons, pas un multiple du bloc ({chunk})"
     stream = Stream(release.windowing)
     last = [stream.push(pcm[i : i + chunk]) for i in range(0, len(pcm), chunk)][-1]
-    if not isinstance(last, Ready) or last.start != _field(excerpt, "window_start_offset_24k"):
+    if not isinstance(last, Ready) or last.start != _field(excerpt, "window_start_offset"):
         return f"le chemin live ne produit pas la fenêtre attendue ({last})"
-    if last.pcm.astype("<i2").tobytes() != base64.b64decode(_field(want, "window_pcm24_b64")):
-        return "fenêtre décimée différente"
+    if last.pcm.astype("<i2").tobytes() != base64.b64decode(_field(want, "window_pcm_b64")):
+        return "fenêtre (après décimation) différente"
+    if (_field(want, "window_ms"), _field(want, "recompute")) != (
+        release.window_ms, dict(release.recompute)
+    ):
+        return "recette de features différente de celle du manifeste"
     got = release.decide(last.pcm)
     return None if _same(got, want) else f"décision différente (score live {got.score})"
 
 
 def _same(got: Decision, want: Mapping[str, Any]) -> bool:
-    flat = [got.features[c] for c in dsp.FLAT_COLS]
-    if not np.allclose(flat, [want["flat"][c] for c in dsp.FLAT_COLS], rtol=0, atol=FEATURE_ATOL):
+    expected = want["flat"]
+    if set(expected) - set(got.features):
         return False
-    if not np.allclose(got.features[dsp.LOGMEL], want["logmel"], rtol=0, atol=FEATURE_ATOL):
+    flat = [got.features[c] for c in expected]
+    if not np.allclose(flat, list(expected.values()), rtol=0, atol=FEATURE_ATOL):
         return False
     if abs(got.score - want["score"]) > DECISION_ATOL:
         return False

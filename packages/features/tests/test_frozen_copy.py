@@ -10,9 +10,10 @@ from pathlib import Path
 import pytest
 
 SRC = Path(__file__).resolve().parents[1] / "src"
-EXPECTED_SHA256 = {  # drone_triangularisation_ia @ ec51823
-    "dsp.py": "4d5f6eb3a31cd8d5a96a23b27092c2fdc5ea063e1e7e44f4e12ba1349a59f7e3",
-    "ml.py": "7822c2b219b62d768c423989938107a5bfa0c0b505313b6ce135cd40a9392cf6",
+EXPECTED_SHA256 = {  # release edth.audio.48k-w100.r1 (drone_triangularisation_ia @ f6c6ce4)
+    "dsp.py": "7510cc2f5826361667f3d718f2b988425a2da5b3c0e0f1aef7d1feab58f26ae8",
+    "features.py": "0a364e73e4bfa80901d0a0da2c71efec066a01081c1e7542c2afe8ce77ffef0f",
+    "ml.py": "c1a6dd8f41fa05cba55273609d07a54b3a93bff9f0b982e6e033a961c6cc4208",
 }
 
 

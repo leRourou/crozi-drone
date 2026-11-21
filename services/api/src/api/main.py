@@ -79,16 +79,25 @@ def make_estimation(
 
 def _model_estimation(settings: Settings, fetch: Fetch) -> Estimation:
     """Release chargée et validée (contrat, empreintes, parité) ; tout échec empêche de démarrer.
-    Les blocs reçus font un pas du modèle : DISTANCE_WINDOW_MS ne concerne que le simulateur."""
+    Les blocs reçus font une période (MODEL_PERIOD_MS, multiple du pas de la release) : le modèle
+    tourne une fois par période ; DISTANCE_WINDOW_MS ne concerne que le simulateur."""
     release = load_release(resolve_bundle(settings, fetch))
     local = settings.model_dir is not None
     if not local and release.name != settings.model_release:
         raise ValueError(
             f"le dossier {settings.model_release} contient la release {release.name}"
         )
-    estimator = ModelEstimator(release, settings.model_uncertainty)
+    estimator = ModelEstimator(release, settings.model_uncertainty, settings.model_period_ms)
     source, revision = ("local", None) if local else (settings.model_repo, settings.model_revision)
-    log.info(kv("model_loaded", release=release.name, source=source, revision=revision))
+    log.info(
+        kv(
+            "model_loaded",
+            release=release.name,
+            source=source,
+            revision=revision,
+            period_ms=settings.model_period_ms,
+        )
+    )
     return Estimation(estimator, estimator.chunk_frames)
 
 
