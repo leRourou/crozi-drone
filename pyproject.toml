@@ -14,6 +14,7 @@ dev = [
 testpaths = [
     "packages/audio-capture/tests",
     "packages/distance-estimation/tests",
+    "packages/features/tests",
     "packages/localization/tests",
     "services/api/tests",
 ]
@@ -21,6 +22,8 @@ testpaths = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Copie figée du repo ML (packages/features/PROVENANCE.md) : jamais reformatée ni corrigée ici.
+extend-exclude = ["packages/features/src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
