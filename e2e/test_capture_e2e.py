@@ -2,12 +2,14 @@
 
 Lancement (depuis la racine) :
     uv run --no-project --with playwright --with pytest --with numpy pytest e2e -q
-Prérequis : `cd front && npm install`, `cd server && uv sync`, navigateur Playwright installé.
+Prérequis : `cd web && npm install`, `uv sync --all-packages`, navigateur Playwright installé.
 """
 
 from __future__ import annotations
 
+import os
 import re
+import signal
 import socket
 import subprocess
 import time
@@ -64,45 +66,53 @@ def dominant_frequency(path: Path) -> float:
 def stack(tmp_path):
     api_port, web_port = free_port(), free_port()
     recordings = tmp_path / "recordings"
-    env_api = {"SAVE_SESSIONS": "1", "RECORDINGS_DIR": str(recordings), "PATH": _path()}
-    env_web = {"THC_BACKEND": f"http://127.0.0.1:{api_port}", "PATH": _path()}
+    env_api = {"SAVE_SESSIONS": "1", "RECORDINGS_DIR": str(recordings), "PATH": os.environ["PATH"]}
+    env_web = {"CROZIDRONE_BACKEND": f"http://127.0.0.1:{api_port}", "PATH": os.environ["PATH"]}
     api_log = (tmp_path / "server.log").open("w")
     api = subprocess.Popen(
-        ["uv", "run", "uvicorn", "app.main:app", "--port", str(api_port)],
-        cwd=ROOT / "server", env=env_api, stdout=api_log, stderr=subprocess.STDOUT,
+        ["uv", "run", "uvicorn", "api.main:app", "--port", str(api_port)],
+        cwd=ROOT,
+        env=env_api,
+        stdout=api_log,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
     )
     web = subprocess.Popen(
         ["npx", "vite", "--port", str(web_port), "--strictPort", "--host", "127.0.0.1"],
-        cwd=ROOT / "front", env=env_web, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        cwd=ROOT / "web",
+        env=env_web,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
     try:
         wait_http(f"http://127.0.0.1:{api_port}/docs")
         wait_http(f"http://127.0.0.1:{web_port}/")
-        yield {"url": f"http://localhost:{web_port}/", "recordings": recordings,
-               "server_log": tmp_path / "server.log"}
+        yield {
+            "url": f"http://localhost:{web_port}/",
+            "recordings": recordings,
+            "server_log": tmp_path / "server.log",
+        }
     finally:
         for proc in (web, api):
-            proc.terminate()
+            # Tout le groupe : `npx` / `uv run` lancent vite / uvicorn comme processus enfants.
+            os.killpg(proc.pid, signal.SIGTERM)
             proc.wait(timeout=10)
         api_log.close()
-
-
-def _path() -> str:
-    import os
-
-    return os.environ["PATH"]
 
 
 def test_fake_microphone_reaches_the_server_bit_exact(stack, tmp_path):
     tone = tmp_path / "tone440.wav"
     write_tone(tone)
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(args=[
-            "--use-fake-device-for-media-stream",
-            "--use-fake-ui-for-media-stream",
-            f"--use-file-for-fake-audio-capture={tone}",
-            "--autoplay-policy=no-user-gesture-required",
-        ])
+        browser = pw.chromium.launch(
+            args=[
+                "--use-fake-device-for-media-stream",
+                "--use-fake-ui-for-media-stream",
+                f"--use-file-for-fake-audio-capture={tone}",
+                "--autoplay-policy=no-user-gesture-required",
+            ]
+        )
         page = browser.new_page()
         page.goto(stack["url"])
         page.get_by_role("button", name="Démarrer").click()
