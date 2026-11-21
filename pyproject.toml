@@ -1,6 +1,8 @@
 # Workspace uv : un package par module (packages/*) + le service qui les assemble (services/*).
 [tool.uv.workspace]
 members = ["packages/*", "services/*"]
+# localization n'a pas encore de pyproject (non intégré) : l'exclure tant qu'il n'est pas branché.
+exclude = ["packages/localization"]
 
 [dependency-groups]
 dev = [
@@ -16,6 +18,7 @@ testpaths = ["packages/audio-capture/tests", "services/api/tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+extend-exclude = ["packages/localization"]  # non intégré, voir [tool.uv.workspace]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]

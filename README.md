@@ -10,9 +10,11 @@ au drone, puis les distances sont combinées pour localiser le drone sur une car
 | --- | --- | --- |
 | `packages/audio-capture` | ① Récupération du son des téléphones | ✅ |
 | `packages/distance-estimation` | ② IA : son → distance au drone | à venir |
-| `packages/localization` | ③ Distances + positions des sources → position du drone | ✅ |
+| `packages/localization` | ③ Distances + positions des sources → position du drone | ⚠️ code présent (`localiser_drone`), pas encore intégré au workspace ni branché |
 | `web/src/display` | ④ Affichage des sources sonores et de la position du drone | à venir |
 | `services/api` | Assemble les modules et sert l'application web | ✅ |
+
+Hors périmètre : iPhone / Safari (le profil WebKit est accepté mais non validé).
 
 ## audio-capture
 

@@ -1,7 +1,8 @@
 # Crozidrone — captation audio temps réel (EDTH Paris 2026)
 
 Chaîne : téléphone (navigateur) → micro via le module partagé → WebSocket binaire → FastAPI.
-Périmètre actuel : captation + logs de preuve uniquement (pas de modèle, fenêtrage, dashboard).
+Périmètre actuel : captation + logs de preuve ; `packages/localization` présent mais pas encore branché.
+Hors périmètre : iPhone / Safari. Le profil WebKit reste accepté tel quel (module partagé) mais n'est pas validé.
 
 ## Invariants non négociables (contrat audio)
 - `vendor/edth/audio_capture.js` est **intouchable** (test SHA-256 dans `packages/audio-capture/tests/test_shared_module.py`).
@@ -45,11 +46,14 @@ contracts/profiles.json   seule source des téléphones (id, libellé, position 
 web/src/capture/          ① page téléphone : packetizer.ts, streamer.ts (session, relance, reconnexion),
                              wakelock.ts (écran allumé), App.tsx (UI)
 web/src/shared/           edth-capture.d.ts (types du module partagé), profiles.ts (contrat, alias `@contracts`)
+packages/localization/    ③ distances → position : `localiser_drone` (capteurs 3D, `tol` relative).
+                             Non intégré : pas de pyproject, exclu du workspace uv et de ruff,
+                             tests (`localization_unit_tests.py`) non collectés par pytest.
 conftest.py               helpers de test partagés (make_hello, sine, packet, TEAM_PROFILES lu du contrat)
 ```
 À venir (ne pas créer avant d'en avoir le code) : `packages/features` (prétraitement commun
 entraînement ↔ inférence), `packages/distance-estimation` (② son → distance),
-`packages/localization` (③ distances → position), `packages/bus`, `ml/`,
+`packages/bus`, `ml/`,
 `web/src/display/` (④ affichage des sources sonores + position du drone).
 Règle : un module n'importe jamais un autre module ; seul `services/api` les assemble.
 
