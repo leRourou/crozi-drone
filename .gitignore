@@ -1,0 +1,13 @@
+recordings/
+node_modules/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+.metrics/
+target/
+dist/
+front/test-results/
+e2e/artifacts/
