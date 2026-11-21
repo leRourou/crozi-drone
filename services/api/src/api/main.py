@@ -1,4 +1,5 @@
-"""Serveur FastAPI : réception temps réel crozidrone.audio-stream.v1 sur /ws/audio."""
+"""Serveur FastAPI : réception temps réel crozidrone.audio-stream.v1 sur /ws/audio,
+état général des téléphones sur /ws/state."""
 
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.logfmt import kv, short_browser
 from api.profiles import Profile, load_profiles
+from api.state import PhoneRegistry, PhoneSession
 from audio_capture.protocol import (
     End,
     Hello,
@@ -28,8 +30,12 @@ from audio_capture.protocol import (
 from audio_capture.recording import WavRecorder
 from audio_capture.session import EndAck, StreamSession
 from audio_capture.stats import StatsSnapshot
+from distance_estimation.estimator import DistanceEstimator
+from distance_estimation.scripted import ScriptedEstimator
+from distance_estimation.windows import WindowAccumulator
 
 STATS_PERIOD_S = 1.0
+STATE_PERIOD_S = 1.0
 POLICY_VIOLATION = 1008
 DEFAULT_RECORDINGS = Path(
     "recordings"
@@ -37,6 +43,20 @@ DEFAULT_RECORDINGS = Path(
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s")
 log = logging.getLogger("crozidrone.audio")
+
+
+# Déposé dans l'inbox d'une connexion par le registre quand une session plus récente du même
+# téléphone démarre. Comparé par identité : un message client ne peut pas l'imiter.
+_REPLACED: dict[str, Any] = {"type": "crozidrone.replaced"}
+
+
+def make_estimator(name: str, profiles: tuple[Profile, ...]) -> DistanceEstimator | None:
+    """DISTANCE_ESTIMATOR : none (défaut, aucun faux drone affiché) ou scripted (mock de ②)."""
+    if name == "none":
+        return None
+    if name == "scripted":
+        return ScriptedEstimator({p.id: (p.x_m, p.y_m, p.z_m) for p in profiles})
+    raise ValueError(f"DISTANCE_ESTIMATOR must be 'none' or 'scripted', got {name!r}")
 
 
 def _recorder_for(hello: Hello) -> WavRecorder | None:
@@ -108,9 +128,17 @@ def _match_label(client_sha: str | None, ack: EndAck | None) -> str:
 class Connection:
     """Une connexion WebSocket = une session. Un seul écrivain : la boucle run()."""
 
-    def __init__(self, ws: WebSocket, known_profiles: frozenset[str]) -> None:
+    def __init__(
+        self,
+        ws: WebSocket,
+        registry: PhoneRegistry,
+        estimator: DistanceEstimator | None = None,
+    ) -> None:
         self.ws = ws
-        self.known_profiles = known_profiles
+        self.registry = registry
+        self.estimator = estimator
+        self.phone: PhoneSession | None = None
+        self.windows: WindowAccumulator | None = None
         self.inbox: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.session: StreamSession | None = None
         self.recorder: WavRecorder | None = None
@@ -132,6 +160,8 @@ class Connection:
             await self._refuse(err)
         finally:
             reader.cancel()
+            if self.phone is not None:
+                self.phone.end(time.monotonic())
             if self.recorder is not None:
                 self.recorder.close()
 
@@ -149,7 +179,7 @@ class Connection:
             return
         if first.get("text") is None:
             raise ProtocolError("invalid_hello", "first message must be a text hello")
-        self._open(parse_hello(first["text"], self.known_profiles))
+        self._open(parse_hello(first["text"], self.registry.ids))
         await self.ws.send_json(
             {
                 "type": "ready",
@@ -164,8 +194,24 @@ class Connection:
         self.sid = str(hello.session_id)[:8]
         self.recorder = _recorder_for(hello)
         sink = self.recorder.write if self.recorder else None
-        self.session = StreamSession(hello, started_at=time.monotonic(), sink=sink)
+        now = time.monotonic()
+        self.session = StreamSession(hello, started_at=now, sink=sink)
+        session_id = str(hello.session_id)
+        self.phone = self.registry.start(
+            hello.profile, session_id, hello.contract, self._replaced, now
+        )
+        if self.estimator is not None:
+            self.windows = WindowAccumulator(hello.profile, session_id)
         _log_start(self.sid, hello)
+
+    def _replaced(self) -> None:
+        self.inbox.put_nowait(_REPLACED)
+
+    def _estimate(self, pcm: bytes, now: float) -> None:
+        if self.windows is None:
+            return
+        for window in self.windows.add(pcm, time.time()):
+            self.phone.estimate(self.estimator.estimate(window), now)
 
     async def _stream(self) -> None:
         next_tick = time.monotonic() + STATS_PERIOD_S
@@ -182,6 +228,7 @@ class Connection:
 
     async def _push_stats(self) -> None:
         snap = self.session.snapshot(time.monotonic())
+        self.phone.stats(snap.rt_ratio, snap.rms_dbfs)
         _log_stats(self.sid, snap)
         await self.ws.send_json(_stats_message(snap))
 
@@ -191,8 +238,14 @@ class Connection:
             log.warning(kv("disconnect", sid=self.sid, code=message.get("code")))
             self._log_end("disconnect")
             return True
+        if message is _REPLACED:
+            raise ProtocolError("session_replaced", "a newer session took over this phone")
         if message.get("bytes") is not None:
-            self.session.accept(parse_packet(message["bytes"]), time.monotonic())
+            now = time.monotonic()
+            pkt = parse_packet(message["bytes"])
+            self.session.accept(pkt, now)
+            self.phone.packet(now)
+            self._estimate(pkt.pcm, now)
             return False
         control = parse_control(message.get("text") or "")
         if isinstance(control, Ping):
@@ -231,20 +284,49 @@ class Connection:
         )
 
 
-def create_app(front_dir: Path | None, profiles: tuple[Profile, ...]) -> FastAPI:
+async def _push_state(ws: WebSocket, registry: PhoneRegistry) -> None:
+    while True:
+        await ws.send_json(registry.snapshot(time.monotonic(), time.time()))
+        await asyncio.sleep(STATE_PERIOD_S)
+
+
+async def _serve_state(ws: WebSocket, registry: PhoneRegistry) -> None:
+    """Envoie l'état tout de suite puis chaque seconde, jusqu'à la déconnexion du client."""
+    await ws.accept()
+    pusher = asyncio.create_task(_push_state(ws, registry))
+    try:
+        while (await ws.receive())["type"] != "websocket.disconnect":
+            pass
+    finally:
+        pusher.cancel()
+
+
+def create_app(
+    front_dir: Path | None, profiles: tuple[Profile, ...], estimator: str = "none"
+) -> FastAPI:
     """front_dir : build Vite servi à la racine (même origine que /ws/audio), ou None (dev).
-    profiles : contrat contracts/profiles.json, chargé une fois au démarrage."""
-    known_profiles = frozenset(p.id for p in profiles)
+    profiles : contrat contracts/profiles.json, chargé une fois au démarrage.
+    estimator : nom de l'estimateur de distance (voir make_estimator)."""
+    distance_estimator = make_estimator(estimator, profiles)
+    registry = PhoneRegistry(profiles, estimator)
 
     async def audio_stream(ws: WebSocket) -> None:
-        await Connection(ws, known_profiles).run()
+        await Connection(ws, registry, distance_estimator).run()
+
+    async def state_stream(ws: WebSocket) -> None:
+        await _serve_state(ws, registry)
 
     application = FastAPI(title="Crozidrone audio stream")
     application.add_api_websocket_route("/ws/audio", audio_stream)
+    application.add_api_websocket_route("/ws/state", state_stream)
     if front_dir is not None:
         application.mount("/", StaticFiles(directory=front_dir, html=True), name="front")
     return application
 
 
 _front_dir = os.environ.get("FRONT_DIR")
-app = create_app(Path(_front_dir) if _front_dir else None, load_profiles())
+app = create_app(
+    Path(_front_dir) if _front_dir else None,
+    load_profiles(),
+    os.environ.get("DISTANCE_ESTIMATOR", "none"),
+)

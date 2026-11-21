@@ -73,7 +73,45 @@ calculés par le serveur sur les octets reçus.
 Paquets : au moins 6 octets, partie audio de longueur paire, `seq` égal à la valeur attendue.
 
 Codes d'erreur : `invalid_hello`, `unknown_protocol`, `unknown_profile`, `unknown_contract`, `invalid_format`,
-`invalid_packet`, `discontinuity`, `unexpected_message`.
+`invalid_packet`, `discontinuity`, `unexpected_message`, `session_replaced`.
+
+`session_replaced` : une session plus récente a démarré avec le même `profile` (la plus récente gagne).
+L'ancienne reçoit cette erreur puis la fermeture 1008, donc le client ne la relance pas. Cela évite
+de bloquer une reconnexion tant que le serveur n'a pas vu la fin de l'ancienne connexion (coupure
+brutale), et deux onglets ouverts sur le même profil ne se relancent pas l'un l'autre en boucle.
+
+## État général : `/ws/state` (serveur → client, lecture seule)
+
+À la connexion puis chaque seconde, le serveur envoie l'état de tous les téléphones du contrat, dans
+l'ordre de `contracts/profiles.json`. Les messages du client sont ignorés.
+
+```json
+{ "type": "state", "server_time": <epoch s>, "estimator": "none|scripted", "drone": null,
+  "phones": [
+    { "profile": "noe", "label": "Téléphone de Noé", "position_m": {"x": 2.06, "y": 9.66, "z": 0},
+      "status": "streaming|stale|offline|never_seen", "session_id": "…|null", "contract": "…|null",
+      "last_seen_age_s": 0.04, "rt_ratio": 1.0, "rms_dbfs": -42.1,
+      "detection": null } ] }
+```
+
+| `status` | Condition |
+| --- | --- |
+| `streaming` | session ouverte, dernier paquet il y a ≤ 1 s |
+| `stale` | session ouverte, aucun paquet depuis plus de 1 s |
+| `offline` | aucune session ouverte ; `last_seen_age_s` = temps écoulé depuis la dernière activité |
+| `never_seen` | aucune session depuis le démarrage du serveur |
+
+`session_id`, `contract`, `rt_ratio`, `rms_dbfs` et `detection` valent `null` hors session.
+`rt_ratio` et `rms_dbfs` restent `null` jusqu'aux premières statistiques.
+
+`detection` vaut `null` sans estimateur (`estimator: "none"`) ou avant la première fenêtre de 500 ms.
+Sinon : `{"drone": bool, "distance_m": float|null, "uncertainty_rel": float|null, "age_s": float,
+"fresh": bool}`. `distance_m` et `uncertainty_rel` ne sont présents que si `drone` est vrai.
+`fresh` est vrai si la détection a ≤ 2 s.
+
+L'estimateur se choisit avec `DISTANCE_ESTIMATOR` : `none` par défaut, ou `scripted` (mock de ②, drone
+virtuel sur une trajectoire connue). Toute autre valeur empêche le serveur de démarrer.
+`drone` (position estimée) reste `null` tant que ③ n'est pas branché.
 
 ## Enregistrement (`SAVE_SESSIONS=1`)
 

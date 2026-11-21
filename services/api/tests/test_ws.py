@@ -7,13 +7,19 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from api.main import app
+from api.main import create_app
+from api.profiles import load_profiles
 from conftest import make_hello, packet, sine
+
+
+def fresh_app(estimator="none"):
+    """Une application neuve par test : le registre d'état ne fuit pas d'un test à l'autre."""
+    return create_app(None, load_profiles(), estimator)
 
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    return TestClient(fresh_app())
 
 
 def open_session(ws, hello=None):
@@ -209,3 +215,56 @@ def test_error_end_without_client_hash_is_logged_as_not_applicable(client, caplo
         ack = receive_until(ws, "end_ack")
     assert ack["match"] is False
     assert "match=n/a" in caplog.text and "reason=error" in caplog.text
+
+
+def test_state_lists_every_contract_phone_and_no_estimator_by_default(client):
+    with client.websocket_connect("/ws/state") as ws:
+        state = ws.receive_json()
+    assert state["type"] == "state" and state["estimator"] == "none"
+    assert [p["profile"] for p in state["phones"]] == ["noe", "tristan", "maxence"]
+    assert {p["status"] for p in state["phones"]} == {"never_seen"}
+
+
+def phone_state(client, profile):
+    with client.websocket_connect("/ws/state") as ws:
+        phones = ws.receive_json()["phones"]
+    [entry] = [p for p in phones if p["profile"] == profile]
+    return entry
+
+
+def test_state_shows_a_phone_streaming_then_offline():
+    with TestClient(fresh_app()) as client:
+        with client.websocket_connect("/ws/audio") as ws:
+            hello = open_session(ws, make_hello(profile="maxence"))
+            send_audio(ws, sine(seconds=0.1))
+            entry = phone_state(client, "maxence")
+            assert (entry["status"], entry["session_id"]) == ("streaming", hello["session_id"])
+            assert entry["detection"] is None
+        assert phone_state(client, "maxence")["status"] == "offline"
+
+
+def test_a_newer_session_on_the_same_phone_stops_the_older_one():
+    with TestClient(fresh_app()) as client, client.websocket_connect("/ws/audio") as old:
+        open_session(old, make_hello(profile="noe"))
+        with client.websocket_connect("/ws/audio") as new:
+            hello = open_session(new, make_hello(profile="noe"))
+            expect_error(old, "session_replaced")
+            assert phone_state(client, "noe")["session_id"] == hello["session_id"]
+
+
+def test_the_scripted_estimator_reports_a_detection_per_received_window():
+    with TestClient(fresh_app("scripted")) as client:
+        assert phone_state(client, "tristan")["detection"] is None
+        with client.websocket_connect("/ws/audio") as ws:
+            open_session(ws, make_hello(profile="tristan"))
+            send_audio(ws, sine(seconds=0.5))
+            ws.send_text(json.dumps({"type": "ping", "t": 1}))
+            receive_until(ws, "pong")  # les paquets précédents ont été traités
+            detection = phone_state(client, "tristan")["detection"]
+    assert detection["fresh"] is True
+    assert detection["drone"] is (detection["distance_m"] is not None)
+
+
+def test_an_unknown_estimator_refuses_to_start():
+    with pytest.raises(ValueError, match="DISTANCE_ESTIMATOR"):
+        create_app(None, load_profiles(), estimator="model")
