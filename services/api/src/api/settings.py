@@ -8,28 +8,40 @@ from __future__ import annotations
 
 import math
 import os
-from collections.abc import Mapping
+import re
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields
 from typing import Any
 
 from audio_capture.protocol import SAMPLE_RATE
 
-ESTIMATORS = ("none", "scripted")
+ESTIMATORS = ("none", "scripted", "model")
+_SHA = re.compile(r"[0-9a-f]{40}")
 
-# Nature d'une valeur : durée en ms (entier > 0), réel > 0, réel ≥ 0, réel quelconque (fini).
-_MS, _POSITIVE, _NON_NEGATIVE, _REAL = "ms", "positive", "non-negative", "real"
+# Nature d'une valeur : durée en ms (entier > 0), réel > 0, réel ≥ 0, réel quelconque (fini),
+# texte facultatif (une variable vide compte comme absente).
+_MS, _POSITIVE, _NON_NEGATIVE, _REAL, _TEXT = "ms", "positive", "non-negative", "real", "text"
 
 
 def _setting(variable: str, kind: str, default: Any) -> Any:
     return field(default=default, metadata={"env": variable, "kind": kind})
 
 
+def _finite(value: Any) -> bool:
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+_VALID: dict[str, Callable[[Any], bool]] = {
+    _MS: lambda v: type(v) is int and v > 0,
+    _POSITIVE: lambda v: _finite(v) and v > 0,
+    _NON_NEGATIVE: lambda v: _finite(v) and v >= 0,
+    _REAL: _finite,
+    _TEXT: lambda v: v is None or (type(v) is str and v != ""),
+}
+
+
 def _valid(kind: str, value: Any) -> bool:
-    if kind == _MS:
-        return type(value) is int and value > 0
-    if type(value) not in (int, float) or not math.isfinite(value):
-        return False
-    return kind == _REAL or value > 0 or (kind == _NON_NEGATIVE and value == 0)
+    return _VALID[kind](value)
 
 
 @dataclass(frozen=True)
@@ -55,6 +67,14 @@ class Settings:
     scripted_range_m: float = _setting("SCRIPTED_RANGE_M", _POSITIVE, 5.0)
     scripted_uncertainty: float = _setting("SCRIPTED_UNCERTAINTY", _POSITIVE, 0.10)
     scripted_noise: float = _setting("SCRIPTED_NOISE", _NON_NEGATIVE, 0.0)  # écart-type relatif
+    # Vrai modèle (DISTANCE_ESTIMATOR=model) : bundle local, sinon repo HF à révision épinglée
+    model_dir: str | None = _setting("DISTANCE_MODEL_DIR", _TEXT, None)
+    model_repo: str | None = _setting("DISTANCE_MODEL_REPO", _TEXT, None)
+    model_revision: str | None = _setting("DISTANCE_MODEL_REVISION", _TEXT, None)
+    model_uncertainty: float = _setting("MODEL_UNCERTAINTY", _POSITIVE, 0.10)  # ± relatif annoncé
+    hf_token: str | None = field(  # secret : absent du repr (logs, traces)
+        default=None, repr=False, metadata={"env": "HF_TOKEN", "kind": _TEXT}
+    )
 
     def __post_init__(self) -> None:
         if self.estimator not in ESTIMATORS:
@@ -65,6 +85,17 @@ class Settings:
             value = getattr(self, f.name)
             if not _valid(f.metadata["kind"], value):
                 raise ValueError(f"{f.metadata['env']} must be {f.metadata['kind']}, got {value!r}")
+        if self.estimator == "model" and self.model_dir is None:
+            self._check_model_source()
+
+    def _check_model_source(self) -> None:
+        """Sans bundle local : un repo et une révision épinglée (sha de commit, pas une branche)."""
+        if self.model_repo is None:
+            raise ValueError("DISTANCE_MODEL_REPO is required (or DISTANCE_MODEL_DIR)")
+        if self.model_revision is None or not _SHA.fullmatch(self.model_revision):
+            raise ValueError(
+                f"DISTANCE_MODEL_REVISION must be a 40-hex commit sha, got {self.model_revision!r}"
+            )
 
     @property
     def window_frames(self) -> int:
@@ -91,9 +122,11 @@ class Settings:
         return self.track_timeout_ms / 1000
 
 
-def _parse(variable: str, kind: str | None, raw: str) -> str | int | float:
+def _parse(variable: str, kind: str | None, raw: str) -> str | int | float | None:
     if kind is None:
         return raw
+    if kind == _TEXT:
+        return raw or None
     if kind == _MS:
         if not raw.isdigit():
             raise ValueError(f"{variable} must be a positive integer (ms), got {raw!r}")

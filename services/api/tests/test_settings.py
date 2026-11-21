@@ -4,6 +4,8 @@ import pytest
 
 from api.settings import Settings, load_settings
 
+SHA = "811bafcd6fa0e94b287b37133d8d6331b50eb3e3"
+
 
 def test_defaults_without_environment():
     assert load_settings({}) == Settings(
@@ -25,6 +27,11 @@ def test_defaults_without_environment():
         scripted_range_m=5.0,
         scripted_uncertainty=0.10,
         scripted_noise=0.0,
+        model_dir=None,
+        model_repo=None,
+        model_revision=None,
+        model_uncertainty=0.10,
+        hf_token=None,
     )
 
 
@@ -83,7 +90,7 @@ def test_window_frames_at_48_khz():
 @pytest.mark.parametrize(
     ("env", "variable"),
     [
-        ({"DISTANCE_ESTIMATOR": "model"}, "DISTANCE_ESTIMATOR"),
+        ({"DISTANCE_ESTIMATOR": "neural"}, "DISTANCE_ESTIMATOR"),
         ({"DISTANCE_WINDOW_MS": "0"}, "DISTANCE_WINDOW_MS"),
         ({"STATE_PERIOD_MS": "-5"}, "STATE_PERIOD_MS"),
         ({"STALE_AFTER_MS": "1.5"}, "STALE_AFTER_MS"),
@@ -102,6 +109,13 @@ def test_window_frames_at_48_khz():
         ({"SCRIPTED_RANGE_M": "-3"}, "SCRIPTED_RANGE_M"),
         ({"SCRIPTED_UNCERTAINTY": "0"}, "SCRIPTED_UNCERTAINTY"),
         ({"SCRIPTED_NOISE": "-0.1"}, "SCRIPTED_NOISE"),
+        ({"MODEL_UNCERTAINTY": "0"}, "MODEL_UNCERTAINTY"),
+        ({"DISTANCE_ESTIMATOR": "model"}, "DISTANCE_MODEL_REPO"),
+        ({"DISTANCE_ESTIMATOR": "model", "DISTANCE_MODEL_REPO": "team/model"},
+         "DISTANCE_MODEL_REVISION"),
+        ({"DISTANCE_ESTIMATOR": "model", "DISTANCE_MODEL_REPO": "team/model",
+          "DISTANCE_MODEL_REVISION": "main"}, "DISTANCE_MODEL_REVISION"),
+        ({"DISTANCE_ESTIMATOR": "model", "DISTANCE_MODEL_REVISION": SHA}, "DISTANCE_MODEL_REPO"),
     ],
 )
 def test_an_invalid_value_refuses_to_start_and_names_the_variable(env, variable):
@@ -113,8 +127,34 @@ def test_an_invalid_value_is_refused_even_without_the_environment():
     with pytest.raises(ValueError, match="DISTANCE_WINDOW_MS"):
         Settings(window_ms=0)
     with pytest.raises(ValueError, match="DISTANCE_ESTIMATOR"):
-        Settings(estimator="model")
+        Settings(estimator="neural")
 
 
 def test_one_millisecond_is_the_smallest_accepted_value():
     assert Settings(window_ms=1, state_period_ms=1).state_period_ms == 1
+
+
+def test_the_model_comes_from_a_pinned_hugging_face_revision():
+    env = {
+        "DISTANCE_ESTIMATOR": "model",
+        "DISTANCE_MODEL_REPO": "team/model",
+        "DISTANCE_MODEL_REVISION": SHA,
+        "HF_TOKEN": "hf_secret",
+        "MODEL_UNCERTAINTY": "0.2",
+    }
+    s = load_settings(env)
+    assert (s.model_repo, s.model_revision, s.hf_token) == ("team/model", SHA, "hf_secret")
+    assert (s.model_dir, s.model_uncertainty) == (None, 0.2)
+
+
+def test_a_local_bundle_needs_no_hugging_face_repo():
+    s = load_settings({"DISTANCE_ESTIMATOR": "model", "DISTANCE_MODEL_DIR": "/srv/release"})
+    assert s.model_dir == "/srv/release"
+
+
+def test_an_empty_variable_counts_as_unset():
+    assert load_settings({"HF_TOKEN": ""}).hf_token is None
+
+
+def test_the_token_never_appears_in_logs_of_the_settings():
+    assert "hf_secret" not in repr(Settings(hf_token="hf_secret"))

@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.fusion import TruthFn, run_fusion
 from api.logfmt import kv, short_browser
+from api.model_fetch import resolve_bundle
 from api.profiles import Profile, load_profiles
 from api.settings import Settings, load_settings
 from api.state import PhoneRegistry, PhoneSession
@@ -35,6 +36,8 @@ from audio_capture.recording import WavRecorder
 from audio_capture.session import EndAck, StreamSession
 from audio_capture.stats import StatsSnapshot
 from distance_estimation.estimator import DistanceEstimator
+from distance_estimation.model import ModelEstimator
+from distance_estimation.release import load_release
 from distance_estimation.scripted import ScriptedEstimator, circle_near
 from distance_estimation.windows import WindowAccumulator
 
@@ -66,6 +69,23 @@ def make_estimation(settings: Settings, profiles: tuple[Profile, ...]) -> Estima
     """None quand DISTANCE_ESTIMATOR=none : aucune détection, donc aucun faux drone affiché."""
     if settings.estimator == "none":
         return None
+    if settings.estimator == "model":
+        return _model_estimation(settings)
+    return _scripted_estimation(settings, profiles)
+
+
+def _model_estimation(settings: Settings) -> Estimation:
+    """Release chargée et validée (contrat, empreintes, parité) ; tout échec empêche de démarrer.
+    Les blocs reçus font un pas du modèle : DISTANCE_WINDOW_MS ne concerne que le simulateur."""
+    release = load_release(resolve_bundle(settings))
+    estimator = ModelEstimator(release, settings.model_uncertainty)
+    local = settings.model_dir is not None
+    source, revision = ("local", None) if local else (settings.model_repo, settings.model_revision)
+    log.info(kv("model_loaded", release=release.name, source=source, revision=revision))
+    return Estimation(estimator, estimator.chunk_frames)
+
+
+def _scripted_estimation(settings: Settings, profiles: tuple[Profile, ...]) -> Estimation:
     positions = {p.id: (p.x_m, p.y_m, p.z_m) for p in profiles}
     trajectory = circle_near(
         positions,
