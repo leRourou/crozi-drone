@@ -1,208 +1,210 @@
 # Crozidrone
 
-Détection et localisation acoustique d'un drone à partir des micros de plusieurs téléphones.
-Projet réalisé pendant l'EDTH Paris 2026.
+**English** | [Français](README.fr.md)
 
-Chaque téléphone diffuse le son de son micro en temps réel vers un serveur. Un modèle estime, pour
-chaque téléphone, si un drone est audible et à quelle distance il se trouve. Les distances sont
-ensuite combinées par multilatération et un filtre de Kalman pour placer le drone sur le plan de la
-salle.
+Acoustic drone detection and localization using the microphones of several smartphones.
+Built during EDTH Paris 2026.
+
+Each phone streams its microphone audio to a server in real time. For each phone, a model estimates
+whether a drone is audible and how far away it is. The distances are then fused through
+multilateration and a Kalman filter to place the drone on a map of the room.
 
 ```
- Téléphones (navigateur)          Serveur FastAPI                               PC de supervision
+ Phones (browser)                 FastAPI server                                Monitoring PC
 ┌──────────────────────┐   PCM   ┌────────────────────────────────────────┐    ┌──────────────────┐
-│ ① capture micro      │ ──────► │ ① réception    ② distance  ③ position │ ─► │ ④ plan de salle  │
-│   48 kHz mono s16le  │   WS    │   /ws/audio      (modèle)    (EKF)     │ WS │   2D / 3D        │
+│ ① mic capture        │ ──────► │ ① ingestion    ② range     ③ position │ ─► │ ④ room map       │
+│   48 kHz mono s16le  │   WS    │   /ws/audio      (model)     (EKF)     │ WS │   2D / 3D        │
 └──────────────────────┘         └────────────────────────────────────────┘    └──────────────────┘
                                                                   /ws/state
 ```
 
-## Sommaire
+## Contents
 
-- [Fonctionnement](#fonctionnement)
-- [Prérequis](#prérequis)
-- [Démarrage rapide](#démarrage-rapide)
+- [How it works](#how-it-works)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
 - [Configuration](#configuration)
-- [Structure du dépôt](#structure-du-dépôt)
-- [Tests et qualité](#tests-et-qualité)
-- [Déploiement](#déploiement)
+- [Repository layout](#repository-layout)
+- [Testing](#testing)
+- [Deployment](#deployment)
 - [Documentation](#documentation)
-- [Limites connues](#limites-connues)
-- [Modèles et données](#modèles-et-données)
-- [Équipe](#équipe)
+- [Known limitations](#known-limitations)
+- [Models and data](#models-and-data)
+- [Team](#team)
 
-## Fonctionnement
+## How it works
 
-| Étape | Code | Rôle |
+| Stage | Code | Role |
 | --- | --- | --- |
-| ① Captation | `packages/audio-capture`, `web/src/capture` | Page téléphone ; flux PCM brut par WebSocket, validé à l'arrivée (format, continuité, SHA-256) |
-| ② Distance | `packages/distance-estimation` | Présence d'un drone et distance, par fenêtres glissantes de 100 ms ; vrai modèle ou drone simulé |
-| ③ Localisation | `packages/localization`, `services/api/.../fusion.py` | Multilatération à partir d'au moins 3 distances, puis suivi par filtre de Kalman étendu |
-| ④ Affichage | `web/src/display` | Plan de la salle : état des téléphones, cercles de distance, position et piste du drone |
+| ① Capture | `packages/audio-capture`, `web/src/capture` | Phone page; raw PCM stream over WebSocket, validated on arrival (format, continuity, SHA-256) |
+| ② Range estimation | `packages/distance-estimation` | Drone presence and distance over 100 ms sliding windows; real model or simulated drone |
+| ③ Localization | `packages/localization`, `services/api/.../fusion.py` | Multilateration from at least 3 distances, then tracking with an extended Kalman filter |
+| ④ Display | `web/src/display` | Room map: phone status, range circles, drone position and track |
 
-**Contrat audio.** La capture passe exclusivement par le module partagé avec l'équipe de collecte
-(`vendor/edth/audio_capture.js`), pour que le serveur reçoive exactement les mêmes octets que ceux sur
-lesquels le modèle a été entraîné : mono, 48 kHz, PCM 16 bits, sans rééchantillonnage, gain, filtrage
-ni codec avec perte. Ce fichier ne doit pas être modifié ; un test vérifie son empreinte.
-Voir [docs/audio-capture-contract.md](docs/audio-capture-contract.md).
+**Audio contract.** Capture goes exclusively through the module shared with the data collection
+team (`vendor/edth/audio_capture.js`), so that the server receives exactly the same bytes the model
+was trained on: mono, 48 kHz, 16-bit PCM, with no resampling, gain, filtering or lossy codec. This
+file must not be modified; a test checks its hash.
+See [docs/audio-capture-contract.md](docs/audio-capture-contract.md) (French).
 
-**Modèle.** Le serveur charge une release publiée par l'équipe ML (`edth.audio.48k-w100.r1`, MLP de
-détection et de distance), depuis un dossier local ou un dépôt Hugging Face à révision épinglée. Au
-démarrage, il vérifie le manifeste, compare le code d'inférence figé (`packages/features`) et rejoue
-un lot de parité ; à la moindre incohérence, il refuse de démarrer plutôt que de basculer sur un mock.
+**Model.** The server loads a release published by the ML team (`edth.audio.48k-w100.r1`, MLPs for
+detection and range), either from a local directory or from a Hugging Face repository pinned to a
+commit. At startup it checks the manifest, compares the frozen inference code (`packages/features`)
+and replays a parity test set; on any mismatch it refuses to start instead of falling back to a mock.
 
-**Temps réel uniquement.** Aucun historique n'est stocké et aucune session n'est rejouée.
-L'enregistrement WAV (`SAVE_SESSIONS=1`) n'existe qu'à titre de preuve et est désactivé par défaut.
+**Real time only.** No history is stored and no session is replayed. WAV recording
+(`SAVE_SESSIONS=1`) exists only as evidence and is disabled by default.
 
-## Prérequis
+## Requirements
 
-- Python 3.12 et [uv](https://docs.astral.sh/uv/) ≥ 0.9
-- Node.js 24 et npm
-- Un tunnel HTTPS (ngrok, Tailscale Serve…) pour les téléphones : les navigateurs n'autorisent
-  l'accès au micro que sur une origine sécurisée
-- Côté téléphone, un navigateur Chromium récent (référence du contrat de capture) ; Firefox peut
-  convenir mais doit être vérifié, iPhone / Safari n'est pas validé
+- Python 3.12 and [uv](https://docs.astral.sh/uv/) ≥ 0.9
+- Node.js 24 and npm
+- An HTTPS tunnel (ngrok, Tailscale Serve…) for the phones: browsers only grant microphone access
+  on a secure origin
+- On the phones, a recent Chromium-based browser (the capture contract's reference); Firefox may
+  work but must be checked, iPhone / Safari is not validated
 
-## Démarrage rapide
+## Quick start
 
 ```bash
-# 1. Dépendances
+# 1. Dependencies
 uv sync --all-packages
 (cd web && npm install)
 
-# 2. Serveur, avec le drone simulé pour voir la chaîne complète sans drone réel
+# 2. Server, with the simulated drone to see the whole pipeline without a real drone
 DISTANCE_ESTIMATOR=scripted uv run uvicorn api.main:app --port 8000
 
-# 3. Front (autre terminal) : Vite sur le port 5173, qui relaie /ws vers le serveur
+# 3. Front end (second terminal): Vite on port 5173, proxying /ws to the server
 cd web && npm run dev
 
-# 4. Exposer Vite en HTTPS pour les téléphones
-ngrok http 5173            # ou : tailscale serve 5173
+# 4. Expose Vite over HTTPS for the phones
+ngrok http 5173            # or: tailscale serve 5173
 ```
 
-Ensuite :
+Then:
 
-- **Sur chaque téléphone** : ouvrir l'URL HTTPS, choisir son téléphone dans la liste, démarrer.
-- **Sur le PC de supervision** : ouvrir `/display.html` (en production, `/display` redirige).
+- **On each phone**: open the HTTPS URL, pick the phone from the list, start.
+- **On the monitoring PC**: open `/display.html` (in production, `/display` redirects to it).
 
-Les téléphones et leur position dans la salle sont déclarés dans
-[`contracts/profiles.json`](contracts/profiles.json), seule source partagée par le serveur et le front.
+Phones and their position in the room are declared in
+[`contracts/profiles.json`](contracts/profiles.json), the single source shared by server and front end.
 
-### Avec le vrai modèle
+### With the real model
 
 ```bash
 cp .env.example .env
-# Décommenter DISTANCE_ESTIMATOR=model et les variables DISTANCE_MODEL_*, renseigner HF_TOKEN si besoin
+# Uncomment DISTANCE_ESTIMATOR=model and the DISTANCE_MODEL_* variables, set HF_TOKEN if needed
 uv run uvicorn api.main:app --port 8000 --env-file .env
 ```
 
-Le premier démarrage télécharge la release dans le cache Hugging Face. Pour le faire à l'avance
-(au déploiement, par exemple) : `uv run --env-file .env python -m api.model_fetch`.
+The first start downloads the release into the Hugging Face cache. To do it ahead of time
+(at deploy time, for instance): `uv run --env-file .env python -m api.model_fetch`.
 
 ## Configuration
 
-Le serveur se configure uniquement par variables d'environnement. Toutes sont facultatives sauf celles
-du modèle quand `DISTANCE_ESTIMATOR=model`. Elles sont validées au démarrage : une valeur invalide
-arrête le serveur avec un message qui nomme la variable.
+The server is configured through environment variables only. All of them are optional, except the
+model variables when `DISTANCE_ESTIMATOR=model`. They are validated at startup: an invalid value
+stops the server with an error naming the variable.
 
-| Variable | Défaut | Rôle |
+| Variable | Default | Role |
 | --- | --- | --- |
-| `DISTANCE_ESTIMATOR` | `none` | `none`, `scripted` (drone simulé) ou `model` |
-| `DISTANCE_MODEL_DIR` | — | Bundle de release local ; prioritaire sur Hugging Face |
-| `DISTANCE_MODEL_REPO` / `_REVISION` / `_RELEASE` | — | Dépôt HF, sha de commit épinglé, dossier de la release |
-| `HF_TOKEN` | — | Jeton Hugging Face (jamais journalisé) |
-| `MODEL_PERIOD_MS` | `100` | Cadence des estimations du modèle |
-| `SAVE_SESSIONS` | — | `1` pour écrire chaque session en WAV dans `RECORDINGS_DIR` (`./recordings`) |
+| `DISTANCE_ESTIMATOR` | `none` | `none`, `scripted` (simulated drone) or `model` |
+| `DISTANCE_MODEL_DIR` | — | Local release bundle; takes precedence over Hugging Face |
+| `DISTANCE_MODEL_REPO` / `_REVISION` / `_RELEASE` | — | HF repository, pinned commit sha, release folder |
+| `HF_TOKEN` | — | Hugging Face token (never logged) |
+| `MODEL_PERIOD_MS` | `100` | Model estimation interval |
+| `SAVE_SESSIONS` | — | `1` to write each session as WAV into `RECORDINGS_DIR` (`./recordings`) |
 
-La liste complète (réglages temps réel, piste du drone, drone simulé) est commentée dans
-[`.env.example`](.env.example) et détaillée dans [docs/protocol.md](docs/protocol.md).
+The full list (real-time settings, drone track, simulated drone) is commented in
+[`.env.example`](.env.example) and detailed in [docs/protocol.md](docs/protocol.md) (French).
 
-Le serveur de dev Vite lit deux variables du shell : `CROZIDRONE_BACKEND` (cible du proxy `/ws`,
-`http://127.0.0.1:8000` par défaut) et `CROZIDRONE_ALLOWED_HOSTS` (hôtes de tunnel supplémentaires,
-séparés par des virgules ; ngrok et `*.ts.net` sont déjà autorisés).
+The Vite dev server reads two shell variables: `CROZIDRONE_BACKEND` (`/ws` proxy target,
+`http://127.0.0.1:8000` by default) and `CROZIDRONE_ALLOWED_HOSTS` (extra tunnel hosts,
+comma-separated; ngrok and `*.ts.net` are already allowed).
 
-## Structure du dépôt
+## Repository layout
 
-Workspace uv : un package Python par étape, assemblés par un seul service. Un package n'importe
-jamais un autre package ; seul `services/api` les relie.
+uv workspace: one Python package per stage, wired together by a single service. A package never
+imports another package; only `services/api` connects them.
 
 ```
 packages/
-  audio-capture/          ① protocole, sessions, statistiques de réception, enregistrement WAV
-  distance-estimation/    ② interface d'estimation, chargement de release, chemin live, mock
-  localization/           ③ multilatération (localiser_drone) et suivi EKF (SuiviDrone)
-  features/               copie figée du code d'inférence de la release ML (ne pas modifier)
-services/api/             application FastAPI : /ws/audio, /ws/state, fusion, réglages
+  audio-capture/          ① protocol, sessions, ingestion statistics, WAV recording
+  distance-estimation/    ② estimator interface, release loading, live path, mock
+  localization/           ③ multilateration (localiser_drone) and EKF tracking (SuiviDrone)
+  features/               frozen copy of the ML release's inference code (do not edit)
+services/api/             FastAPI app: /ws/audio, /ws/state, fusion, settings
 web/
-  src/capture/            page téléphone
-  src/display/            plan de salle 2D, vue 3D (three.js) chargée à la demande
-  src/shared/             types du module partagé, profils, utilitaires réseau
-contracts/profiles.json   téléphones et positions (x, y, z en mètres)
-vendor/edth/              module de capture partagé (intouchable)
-docs/                     protocole WebSocket et contrat de capture
-e2e/                      test de bout en bout (Chromium avec faux micro)
+  src/capture/            phone page
+  src/display/            2D room map, lazily loaded 3D view (three.js)
+  src/shared/             shared module types, profiles, network helpers
+contracts/profiles.json   phones and positions (x, y, z in metres)
+vendor/edth/              shared capture module (read-only)
+docs/                     WebSocket protocol and capture contract
+e2e/                      end-to-end test (Chromium with a fake microphone)
 ```
 
-## Tests et qualité
+## Testing
 
 ```bash
-# Python : lint + tests unitaires
+# Python: lint + unit tests
 uv run ruff check && uv run pytest
 
-# Front : tests, vérification de types et build
+# Front end: tests, type check and build
 cd web && npm test && npm run build
 
-# Bout en bout : lance uvicorn et Vite, Chromium avec un faux micro à 440 Hz
+# End to end: starts uvicorn and Vite, Chromium with a fake 440 Hz microphone
 uv run --no-project --with playwright --with pytest --with numpy pytest e2e -q
 ```
 
-Le test e2e nécessite un navigateur Playwright (`uv run --with playwright playwright install chromium`).
+The e2e test needs a Playwright browser (`uv run --with playwright playwright install chromium`).
 
-Certains tests protègent des invariants du projet et ne doivent pas être contournés : empreinte
-SHA-256 du module de capture partagé et de la copie figée `packages/features`, parité du modèle
-rejouée au chargement.
+Some tests guard project invariants and must not be bypassed: SHA-256 hashes of the shared capture
+module and of the frozen `packages/features` copy, model parity replayed at load time.
 
-## Déploiement
+## Deployment
 
-Une image unique sert le front buildé, les WebSockets et l'API sur le même port ; le HTTPS est
-attendu en amont (reverse proxy).
+A single image serves the built front end, the WebSockets and the API on one port; HTTPS is expected
+upstream (reverse proxy).
 
 ```bash
 docker build -t crozidrone .
 docker run --rm -p 8000:8000 --env-file .env -v crozidrone-data:/data crozidrone
 ```
 
-Le volume `/data` contient les enregistrements et le cache Hugging Face, ce qui évite de retélécharger
-le modèle à chaque redémarrage. L'image est déployée sur Coolify, dont le proxy assure le HTTPS.
+The `/data` volume holds recordings and the Hugging Face cache, so the model is not downloaded again
+on every restart. The image is deployed on Coolify, whose proxy terminates HTTPS.
 
 ## Documentation
 
-- [Protocole WebSocket](docs/protocol.md) : messages de `/ws/audio` et `/ws/state`, validation,
-  chargement du modèle, sortie de la localisation, toutes les variables d'environnement
-- [Contrat de capture](docs/audio-capture-contract.md) : paramètres du signal, profil WebKit,
-  provenance des données d'entraînement
-- [Provenance du code figé](packages/features/PROVENANCE.md) : release, empreintes, procédure de mise à jour
+The detailed documentation is written in French.
 
-## Limites connues
+- [WebSocket protocol](docs/protocol.md): `/ws/audio` and `/ws/state` messages, validation, model
+  loading, localization output, every environment variable
+- [Capture contract](docs/audio-capture-contract.md): signal parameters, WebKit profile, training
+  data provenance
+- [Frozen code provenance](packages/features/PROVENANCE.md): release, hashes, update procedure
 
-- iPhone / Safari : le profil de capture WebKit est accepté mais n'a pas été validé.
-- La distance prédite par la release r1 est bornée à [1, 5] m.
-- Les téléphones étant posés au même niveau, les distances seules contraignent mal l'altitude ;
-  la piste est ramenée vers `TRACK_ALTITUDE_M`.
+## Known limitations
 
-## Modèles et données
+- iPhone / Safari: the WebKit capture profile is accepted but has not been validated.
+- Distances predicted by release r1 are clamped to [1, 5] m.
+- With all phones at the same height, distances alone barely constrain altitude; the track is pulled
+  towards `TRACK_ALTITUDE_M`.
 
-Les modèles entraînés et le jeu de données sont publiés sur Hugging Face :
+## Models and data
 
-- Modèles : [ImAPancake/EDTH_Paris26_models](https://huggingface.co/ImAPancake/EDTH_Paris26_models)
-- Dataset : [ImAPancake/EDTH_Paris26_dataset](https://huggingface.co/datasets/ImAPancake/EDTH_Paris26_dataset)
+The trained models and the dataset are published on Hugging Face:
 
-## Équipe
+- Models: [ImAPancake/EDTH_Paris26_models](https://huggingface.co/ImAPancake/EDTH_Paris26_models)
+- Dataset: [ImAPancake/EDTH_Paris26_dataset](https://huggingface.co/datasets/ImAPancake/EDTH_Paris26_dataset)
 
-| Membre | Contributions |
+## Team
+
+| Member | Contributions |
 | --- | --- |
-| Tristan ([@XXGIGASHADOWPAUL38XX](https://github.com/XXGIGASHADOWPAUL38XX)) | Pré-traitement et traitement du son, extraction des features, mise en forme des données, benchmarking |
-| Noé ([@NoeGuedet](https://github.com/NoeGuedet)) | Conception et constitution du dataset, entraînement des modèles, benchmarking |
-| Axel ([@leRourou](https://github.com/leRourou)) | Architecture, application web, design, déploiement |
-| Maxence ([@m-cheve](https://github.com/m-cheve)) | Localisation du drone à partir des distances, filtre de Kalman |
-| Charlène ([@Charlene7508](https://github.com/Charlene7508)) | Vision produit, gestion de projet, organisation et communication |
+| Tristan ([@XXGIGASHADOWPAUL38XX](https://github.com/XXGIGASHADOWPAUL38XX)) | Audio pre-processing and signal processing, feature extraction, data formatting, benchmarking |
+| Noé ([@NoeGuedet](https://github.com/NoeGuedet)) | Dataset design and collection, model training, benchmarking |
+| Axel ([@leRourou](https://github.com/leRourou)) | Architecture, web application, design, deployment |
+| Maxence ([@m-cheve](https://github.com/m-cheve)) | Drone localization from range data, Kalman filter |
+| Charlène ([@Charlene7508](https://github.com/Charlene7508)) | Product vision, project management, organization and communication |
