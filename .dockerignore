@@ -12,3 +12,4 @@
 recordings
 e2e
 web/test-results
+.env

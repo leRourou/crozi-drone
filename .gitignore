@@ -12,3 +12,4 @@ dist/
 web/test-results/
 e2e/artifacts/
 coverage/
+.env
